@@ -1,0 +1,106 @@
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -2,6 +2,8 @@
+ 
+ import 'package:firebase_auth/firebase_auth.dart';
+ import 'package:firebase_core/firebase_core.dart';
++import 'package:cloud_firestore/cloud_firestore.dart';
++import 'package:firebase_storage/firebase_storage.dart';
+ import 'package:flutter/material.dart';
+ 
+ import 'app_navigator.dart';
+@@ -25,6 +27,9 @@
+ 
+   if (Platform.isAndroid) {
+     await Firebase.initializeApp(options: DefaultFirebaseOptions.android);
++    await FirebaseAuth.instance.useAuthEmulator('10.0.2.2', 19099);
++    FirebaseFirestore.instance.useFirestoreEmulator('10.0.2.2', 18080);
++    await FirebaseStorage.instance.useStorageEmulator('10.0.2.2', 19199);
+     await FirebaseAuth.instance.setSettings(
+       appVerificationDisabledForTesting: false,
+       forceRecaptchaFlow: false,
+@@ -53,7 +58,7 @@
+     return MaterialApp(
+       navigatorKey: appNavigatorKey,
+       debugShowCheckedModeBanner: false,
+-      title: 'Hotel Pro 1',
++      title: 'Hotel Pro 1 LOCAL TEST',
+       home: const _AuthGate(),
+     );
+   }
+--- a/lib/firebase_options.dart
++++ b/lib/firebase_options.dart
+@@ -18,10 +18,10 @@
+   }
+ 
+   static const FirebaseOptions android = FirebaseOptions(
+-    apiKey: 'AIzaSyDluaE9ZCxnDcRlW-HwFIuSDJnBUEbQjFU',
++    apiKey: 'AIzaSyLOCALTEST0000000000000000000000000',
+     appId: '1:731313332286:android:b27b800afa2dc084d4716f',
+     messagingSenderId: '731313332286',
+-    projectId: 'yankees-hotel-pro',
+-    storageBucket: 'yankees-hotel-pro.firebasestorage.app',
++    projectId: 'demo-hotel-pro-sync',
++    storageBucket: 'demo-hotel-pro-sync.appspot.com',
+   );
+ }
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -4,7 +4,7 @@
+ plugins {
+     id("com.android.application")
+     // START: FlutterFire Configuration
+-    id("com.google.gms.google-services")
++    
+     // END: FlutterFire Configuration
+     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+     id("dev.flutter.flutter-gradle-plugin")
+@@ -27,7 +27,7 @@
+     }
+ 
+     defaultConfig {
+-        applicationId = "com.hotelpro1.app"
++        applicationId = "com.hotelpro1.app.synctest"
+         minSdk = flutter.minSdkVersion
+         targetSdk = flutter.targetSdkVersion
+         versionCode = flutter.versionCode
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -1,10 +1,12 @@
+-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
++<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+     <uses-permission android:name="android.permission.INTERNET"/>
+     <uses-permission android:name="android.permission.CAMERA"/>
+     <application
+-        android:label="@string/app_name"
++        android:label="Hotel Pro LOCAL TEST"
++        android:networkSecurityConfig="@xml/local_test_network_security"
+         android:name="${applicationName}"
+         android:icon="@mipmap/ic_launcher">
++        <provider android:name="com.google.firebase.provider.FirebaseInitProvider" tools:node="remove"/>
+         <activity
+             android:name=".MainActivity"
+             android:exported="true"
+--- a/android/gradle.properties
++++ b/android/gradle.properties
+@@ -1,6 +1,9 @@
+-org.gradle.jvmargs=-Xmx8G -XX:MaxMetaspaceSize=4G -XX:ReservedCodeCacheSize=512m -XX:+HeapDumpOnOutOfMemoryError
++org.gradle.jvmargs=-Xmx2G -XX:MaxMetaspaceSize=768m -XX:ReservedCodeCacheSize=512m -XX:+HeapDumpOnOutOfMemoryError
+ android.useAndroidX=true
+ # This newDsl flag was added by the Flutter template
+ android.newDsl=false
+ # This builtInKotlin flag was added by the Flutter template
+ android.builtInKotlin=false
++
++org.gradle.workers.max=2
++kotlin.daemon.jvmargs=-Xmx512m
+--- /dev/null
++++ b/android/app/src/main/res/xml/local_test_network_security.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<network-security-config>
++    <base-config cleartextTrafficPermitted="false" />
++    <domain-config cleartextTrafficPermitted="true">
++        <domain includeSubdomains="false">10.0.2.2</domain>
++    </domain-config>
++</network-security-config>

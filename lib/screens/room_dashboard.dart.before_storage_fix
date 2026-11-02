@@ -1,0 +1,1685 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../dialogs/booking_view_dialog.dart';
+import '../dialogs/bill_preview_dialog.dart';
+import '../dialogs/booking_dialog.dart';
+import '../models/room.dart';
+import '../models/customer.dart';
+import '../models/bill_record.dart';
+import '../stores/bill_store.dart';
+import '../stores/customer_store.dart';
+import '../stores/expense_store.dart';
+import '../stores/hotel_settings_store.dart';
+import '../dialogs/room_control_dialog.dart';
+import '../dialogs/customer_list_dialog.dart';
+import '../dialogs/reports_dialog.dart';
+import '../dialogs/expenses_dialog.dart';
+import '../dialogs/backup_restore_dialog.dart';
+import '../dialogs/fresh_hotel_start_dialog.dart';
+import '../dialogs/hotel_settings_dialog.dart';
+
+class RoomDashboard extends StatefulWidget {
+  const RoomDashboard({super.key});
+
+  @override
+  State<RoomDashboard> createState() {
+    return _RoomDashboardState();
+  }
+}
+
+class _RoomDashboardState extends State<RoomDashboard> {
+  Timer? _stayTimer;
+  final List<Room> rooms = [
+    Room(roomNumber: 101, roomType: "Deluxe", normalRent: 1500),
+    Room(roomNumber: 102, roomType: "Luxury", normalRent: 2000),
+    Room(roomNumber: 103, roomType: "Deluxe", normalRent: 1500),
+    Room(roomNumber: 104, roomType: "Luxury", normalRent: 2000),
+    Room(roomNumber: 105, roomType: "Deluxe", normalRent: 1500),
+    Room(roomNumber: 106, roomType: "Luxury", normalRent: 2000),
+    Room(roomNumber: 107, roomType: "Deluxe", normalRent: 1500),
+    Room(roomNumber: 108, roomType: "Suite", normalRent: 2500),
+    Room(roomNumber: 109, roomType: "Deluxe", normalRent: 1500),
+    Room(roomNumber: 110, roomType: "Luxury", normalRent: 2000),
+    Room(roomNumber: 111, roomType: "Deluxe", normalRent: 1500),
+    Room(roomNumber: 112, roomType: "Suite", normalRent: 2500),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    loadRooms();
+
+    _stayTimer = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
+      if (mounted) {
+        super.setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _stayTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> saveRooms() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final roomData = rooms.map((room) => room.toJson()).toList();
+
+    await prefs.setString("silver_cloud_rooms", jsonEncode(roomData));
+  }
+
+  Future<void> loadRooms() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final savedData = prefs.getString("silver_cloud_rooms");
+
+    if (savedData == null) {
+      await saveRooms();
+      return;
+    }
+
+    final decoded = jsonDecode(savedData) as List<dynamic>;
+
+    final loadedRooms = decoded
+        .map((item) => Room.fromJson(Map<String, dynamic>.from(item as Map)))
+        .toList();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      rooms
+        ..clear()
+        ..addAll(loadedRooms);
+
+      for (final Room room in rooms) {
+        if (room.status == "BOOKED" && room.bookingTime == null) {
+          room.bookingTime = room.bookingDate ?? DateTime.now();
+        }
+      }
+    });
+  }
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    saveRooms();
+  }
+
+  Color getRoomColor(String status) {
+    if (status == "EMPTY") {
+      return Colors.green.shade700;
+    }
+
+    if (status == "BOOKED") {
+      return Colors.red.shade700;
+    }
+
+    if (status == "CLEANING") {
+      return Colors.amber.shade700;
+    }
+
+    return const Color(0xFF800000);
+  }
+
+  int countStatus(String status) {
+    return rooms.where((room) {
+      return room.status == status;
+    }).length;
+  }
+
+  String formatDate(DateTime date) {
+    String day = date.day.toString().padLeft(2, "0");
+
+    String month = date.month.toString().padLeft(2, "0");
+
+    return "$day-$month-${date.year}";
+  }
+
+  Future<void> changeRoom(Room oldRoom) async {
+    List<Room> availableRooms = rooms.where((room) {
+      return room.status == "EMPTY" &&
+          room.roomNumber != oldRoom.roomNumber &&
+          room.futureBooking == false;
+    }).toList();
+
+    if (availableRooms.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+
+      await showDialog(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            title: const Text("No Room Available"),
+            content: const Text("No empty room is available for room change."),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text("OK"),
+              ),
+            ],
+          );
+        },
+      );
+
+      return;
+    }
+
+    Room? selectedRoom;
+
+    bool? changeConfirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter updateDialog) {
+            return AlertDialog(
+              title: Text("Change Room ${oldRoom.roomNumber}"),
+              content: SizedBox(
+                width: 450,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Guest : ${oldRoom.guestName}",
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    const SizedBox(height: 5),
+
+                    Text("Current Room : ${oldRoom.roomNumber}"),
+
+                    const SizedBox(height: 20),
+
+                    DropdownButtonFormField<Room>(
+                      initialValue: selectedRoom,
+                      decoration: const InputDecoration(
+                        labelText: "Select New Room",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.hotel),
+                      ),
+                      items: availableRooms.map((Room room) {
+                        return DropdownMenuItem<Room>(
+                          value: room,
+                          child: Text(
+                            "Room ${room.roomNumber}  |  "
+                            "${room.roomType}  |  "
+                            "₹${room.normalRent}",
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (Room? room) {
+                        updateDialog(() {
+                          selectedRoom = room;
+                        });
+                      },
+                    ),
+
+                    if (selectedRoom != null) ...[
+                      const SizedBox(height: 20),
+
+                      const Divider(),
+
+                      Text(
+                        "New Room : "
+                        "${selectedRoom!.roomNumber}",
+                      ),
+
+                      Text(
+                        "Room Type : "
+                        "${selectedRoom!.roomType}",
+                      ),
+
+                      Text(
+                        "Normal Rent : "
+                        "₹${selectedRoom!.normalRent} / Day",
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      const Text(
+                        "Guest and current billing will be transferred to the new room.",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext, false);
+                  },
+                  child: const Text("CANCEL"),
+                ),
+
+                ElevatedButton.icon(
+                  onPressed: selectedRoom == null
+                      ? null
+                      : () {
+                          Navigator.pop(dialogContext, true);
+                        },
+                  icon: const Icon(Icons.swap_horiz),
+                  label: const Text("CONFIRM ROOM CHANGE"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (changeConfirmed != true || selectedRoom == null) {
+      return;
+    }
+
+    Room newRoom = selectedRoom!;
+
+    setState(() {
+      newRoom.mobile = oldRoom.mobile;
+      newRoom.guestName = oldRoom.guestName;
+      newRoom.idNumber = oldRoom.idNumber;
+
+      newRoom.bookingRate = oldRoom.bookingRate;
+      newRoom.bookingDate = oldRoom.bookingDate;
+      newRoom.days = oldRoom.days;
+      newRoom.advance = oldRoom.advance;
+      newRoom.paymentMode = oldRoom.paymentMode;
+
+      newRoom.charges = List<Map<String, dynamic>>.from(oldRoom.charges);
+
+      newRoom.extraGuests = oldRoom.extraGuests
+          .map((guest) => Map<String, dynamic>.from(guest))
+          .toList();
+
+      newRoom.status = "BOOKED";
+      newRoom.futureBooking = false;
+
+      oldRoom.mobile = "";
+      oldRoom.guestName = "";
+      oldRoom.idNumber = "";
+
+      oldRoom.bookingRate = oldRoom.normalRent;
+      oldRoom.bookingDate = null;
+      oldRoom.days = 0;
+      oldRoom.advance = 0;
+      oldRoom.paymentMode = "";
+
+      oldRoom.charges = [];
+      oldRoom.extraGuests = [];
+
+      oldRoom.status = "EMPTY";
+      oldRoom.futureBooking = false;
+    });
+
+    if (!mounted) {
+      return;
+    }
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext successContext) {
+        return AlertDialog(
+          title: const Text("Room Changed Successfully"),
+          content: Text(
+            "Guest : ${newRoom.guestName}\n\n"
+            "Old Room : ${oldRoom.roomNumber}\n"
+            "New Room : ${newRoom.roomNumber}\n\n"
+            "Room ${oldRoom.roomNumber} is now EMPTY.\n"
+            "Room ${newRoom.roomNumber} is now BOOKED.",
+          ),
+          actions: [
+            TextButton(
+              autofocus: true,
+              onPressed: () {
+                Navigator.pop(successContext);
+              },
+              child: const Text("OK"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> checkoutRoom(Room room) async {
+    int roomBill = room.bookingRate * room.days;
+
+    int extraCharges = 0;
+
+    for (final charge in room.charges) {
+      extraCharges += charge["amount"] as int;
+    }
+
+    int totalBill = roomBill + extraCharges;
+
+    int totalPartPayments = 0;
+
+    for (final payment in room.partPayments) {
+      totalPartPayments += payment["amount"] as int;
+    }
+
+    int balance = totalBill - room.advance - totalPartPayments;
+
+    String paymentMode = "Cash";
+
+    bool? paymentConfirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter updateDialog) {
+            return AlertDialog(
+              title: Text("Checkout Room ${room.roomNumber}"),
+              content: SizedBox(
+                width: 480,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Guest : ${room.guestName}",
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      Text("Mobile : ${room.mobile}"),
+
+                      const Divider(),
+
+                      Text(
+                        "Room Rent : "
+                        "₹${room.bookingRate} × "
+                        "${room.days} Days",
+                      ),
+
+                      Text("Room Bill : ₹$roomBill"),
+
+                      const SizedBox(height: 10),
+
+                      const Text(
+                        "Extra Charges",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+
+                      if (room.charges.isEmpty) const Text("No Extra Charges"),
+
+                      ...room.charges.map<Widget>((charge) {
+                        return Text(
+                          "${charge["name"]} : "
+                          "₹${charge["amount"]}",
+                        );
+                      }),
+
+                      const Divider(),
+
+                      Text(
+                        "TOTAL BILL : ₹$totalBill",
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      Text("ADVANCE : ₹${room.advance}"),
+
+                      Text(
+                        "PART PAYMENT : ₹$totalPartPayments",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      Text(
+                        "BALANCE PAYMENT : ₹$balance",
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      DropdownButtonFormField<String>(
+                        initialValue: paymentMode,
+                        decoration: const InputDecoration(
+                          labelText: "Balance Payment Mode",
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.payment),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: "Cash", child: Text("Cash")),
+                          DropdownMenuItem(value: "UPI", child: Text("UPI")),
+                          DropdownMenuItem(value: "Card", child: Text("Card")),
+                          DropdownMenuItem(
+                            value: "Bank Transfer",
+                            child: Text("Bank Transfer"),
+                          ),
+                        ],
+                        onChanged: (String? value) {
+                          if (value != null) {
+                            updateDialog(() {
+                              paymentMode = value;
+                            });
+                          }
+                        },
+                      ),
+
+                      const SizedBox(height: 15),
+
+                      const Text(
+                        "After payment, room status will change to CLEANING.",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext, false);
+                  },
+                  child: const Text("CANCEL"),
+                ),
+
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(dialogContext, true);
+                  },
+                  icon: const Icon(Icons.check_circle),
+                  label: Text("RECEIVE ₹$balance & CHECKOUT"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (paymentConfirmed != true) {
+      return;
+    }
+
+    setState(() {
+      room.paymentMode = paymentMode;
+      room.checkoutTime = DateTime.now();
+      room.status = "CLEANING";
+      room.futureBooking = false;
+    });
+
+    final Customer? billCustomer = CustomerStore.findByMobile(room.mobile);
+
+    final String billNumber = BillStore.nextBillNumber();
+
+    final BillRecord finalBill = BillRecord(
+      billNumber: billNumber,
+      customerId: billCustomer?.customerId ?? "-",
+      guestName: room.guestName,
+      mobile: room.mobile,
+      roomNumber: room.roomNumber,
+      roomType: room.roomType,
+      bookingDate: room.bookingDate,
+      bookingTime: room.bookingTime,
+      checkoutTime: room.checkoutTime!,
+      roomRate: room.bookingRate,
+      bookedDays: room.days,
+      roomBill: roomBill,
+      charges: List<Map<String, dynamic>>.from(room.charges),
+      partPayments: List<Map<String, dynamic>>.from(room.partPayments),
+      extraCharges: extraCharges,
+      totalBill: totalBill,
+      advance: room.advance,
+      advancePaymentMode: room.paymentMode,
+      balance: balance,
+      paymentMode: paymentMode,
+    );
+
+    await BillStore.saveBill(finalBill);
+
+    await CustomerStore.addStayHistory(room.mobile, {
+      "roomNumber": room.roomNumber,
+      "bookingDate": room.bookingDate?.toIso8601String(),
+      "bookingTime": room.bookingTime?.toIso8601String(),
+      "checkoutTime": room.checkoutTime?.toIso8601String(),
+      "roomRate": room.bookingRate,
+      "days": room.days,
+      "roomBill": roomBill,
+      "extraCharges": extraCharges,
+      "charges": List<Map<String, dynamic>>.from(room.charges),
+      "totalBill": totalBill,
+      "advance": room.advance,
+      "balance": balance,
+      "paymentMode": paymentMode,
+    });
+
+    for (final Map<String, dynamic> guest in room.extraGuests) {
+      final String extraMobile = guest["mobile"]?.toString() ?? "";
+
+      if (extraMobile.isEmpty) {
+        continue;
+      }
+
+      await CustomerStore.addStayHistory(extraMobile, {
+        "roomNumber": room.roomNumber,
+        "bookingDate": room.bookingDate?.toIso8601String(),
+        "bookingTime": room.bookingTime?.toIso8601String(),
+        "checkoutTime": room.checkoutTime?.toIso8601String(),
+        "roomRate": room.bookingRate,
+        "days": room.days,
+        "roomBill": roomBill,
+        "extraCharges": extraCharges,
+        "charges": List<Map<String, dynamic>>.from(room.charges),
+        "totalBill": totalBill,
+        "advance": room.advance,
+        "balance": balance,
+        "paymentMode": paymentMode,
+        "sharedStay": true,
+        "primaryGuestMobile": room.mobile,
+      });
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    await showBillPreviewDialog(context, finalBill);
+  }
+
+  Future<void> completeCleaning(Room room) async {
+    bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text("Room ${room.roomNumber} Cleaning"),
+          content: const Text(
+            "Is room cleaning complete?\n\n"
+            "Guest and old billing data will be cleared.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, false);
+              },
+              child: const Text("CANCEL"),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext, true);
+              },
+              icon: const Icon(Icons.cleaning_services),
+              label: const Text("CLEANING COMPLETE"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      room.mobile = "";
+      room.guestName = "";
+      room.idNumber = "";
+
+      room.bookingRate = room.normalRent;
+      room.bookingDate = null;
+      room.days = 0;
+      room.advance = 0;
+      room.paymentMode = "";
+
+      room.charges = [];
+      room.extraGuests = [];
+
+      room.status = "EMPTY";
+      room.futureBooking = false;
+    });
+
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Room ${room.roomNumber} is now EMPTY")),
+    );
+  }
+
+  Future<void> manageClosedRoom(Room room) async {
+    String selectedFault = room.faultReason.isEmpty
+        ? "Technical Fault"
+        : room.faultReason;
+
+    String? action = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter updateDialog) {
+            return AlertDialog(
+              title: Text("ROOM ${room.roomNumber} - CLOSED"),
+              content: SizedBox(
+                width: 450,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "● ROOM CLOSED",
+                      style: TextStyle(
+                        color: Color(0xFF800000),
+                        fontSize: 19,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    const SizedBox(height: 15),
+
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedFault,
+                      decoration: const InputDecoration(
+                        labelText: "Fault / Closing Reason",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.build),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: "Technical Fault",
+                          child: Text("Technical Fault"),
+                        ),
+                        DropdownMenuItem(
+                          value: "AC Fault",
+                          child: Text("AC Fault"),
+                        ),
+                        DropdownMenuItem(
+                          value: "Electrical Fault",
+                          child: Text("Electrical Fault"),
+                        ),
+                        DropdownMenuItem(
+                          value: "Plumbing Fault",
+                          child: Text("Plumbing Fault"),
+                        ),
+                        DropdownMenuItem(
+                          value: "Renovation",
+                          child: Text("Renovation"),
+                        ),
+                        DropdownMenuItem(value: "Other", child: Text("Other")),
+                      ],
+                      onChanged: (String? value) {
+                        if (value != null) {
+                          updateDialog(() {
+                            selectedFault = value;
+                          });
+                        }
+                      },
+                    ),
+
+                    const SizedBox(height: 15),
+
+                    Text(
+                      "Current Reason : $selectedFault",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext, "CLOSE");
+                  },
+                  child: const Text("CLOSE"),
+                ),
+
+                OutlinedButton.icon(
+                  onPressed: () {
+                    room.faultReason = selectedFault;
+
+                    Navigator.pop(dialogContext, "SAVED");
+                  },
+                  icon: const Icon(Icons.save),
+                  label: const Text("SAVE FAULT"),
+                ),
+
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(dialogContext, "REPAIRED");
+                  },
+                  icon: const Icon(Icons.check_circle),
+                  label: const Text("ROOM REPAIRED / OPEN ROOM"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (action == "SAVED") {
+      setState(() {
+        room.faultReason = selectedFault;
+      });
+
+      return;
+    }
+
+    if (action == "REPAIRED") {
+      setState(() {
+        room.status = "EMPTY";
+        room.faultReason = "";
+      });
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Room ${room.roomNumber} is repaired and now EMPTY"),
+        ),
+      );
+    }
+  }
+
+  Future<void> openRoom(Room room) async {
+    if (room.status == "CLEANING") {
+      await completeCleaning(room);
+      return;
+    }
+    if (room.status == "CLOSED") {
+      await manageClosedRoom(room);
+      return;
+    }
+    if (room.futureBooking && room.status != "BOOKED") {
+      String? futureAction = await showDialog<String>(
+        context: context,
+        builder: (BuildContext futureContext) {
+          return AlertDialog(
+            title: Text("ROOM ${room.roomNumber}"),
+            content: const Text("This room has a Future Booking"),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(futureContext, "CLOSE");
+                },
+                child: const Text("CLOSE"),
+              ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(futureContext, "VIEW");
+                },
+                icon: const Icon(Icons.visibility),
+                label: const Text("VIEW FUTURE BOOKING"),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(futureContext, "NEW_BOOKING");
+                },
+                icon: const Icon(Icons.add),
+                label: const Text("NEW BOOKING"),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (futureAction == "VIEW") {
+        await showBookingViewDialog(context, room, showFutureBooking: true);
+
+        return;
+      }
+
+      if (futureAction == "NEW_BOOKING") {
+        bool? booked = await showBookingDialog(context, room);
+
+        if (booked == true && mounted) {
+          setState(() {});
+        }
+
+        return;
+      }
+
+      return;
+    }
+    if (room.status == "BOOKED") {
+      String? action = await showRoomControlDialog(context, room);
+
+      if (action == "CHANGE_ROOM") {
+        await changeRoom(room);
+        return;
+      }
+
+      if (action == "CHECKOUT") {
+        await checkoutRoom(room);
+        return;
+      }
+
+      if (mounted) {
+        setState(() {});
+      }
+
+      return;
+    }
+
+    bool? openBooking = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: Text("ROOM ${room.roomNumber}"),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Status : ${room.status}",
+                  style: TextStyle(
+                    color: getRoomColor(room.status),
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Divider(),
+                Text("Room Type : ${room.roomType}"),
+                Text("Normal Rent : ₹${room.normalRent} / Day"),
+                if (room.futureBooking && room.futureBookingDate != null) ...[
+                  const SizedBox(height: 15),
+                  Text(
+                    "FUTURE BOOKING",
+                    style: TextStyle(
+                      color: Colors.blue.shade700,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    "Booking Date : "
+                    "${formatDate(room.futureBookingDate!)}",
+                  ),
+                  Text("Guest : ${room.guestName}"),
+                ],
+                const SizedBox(height: 20),
+                if (room.status == "EMPTY")
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(dialogContext, true);
+                      },
+                      icon: const Icon(Icons.book_online),
+                      label: const Text("BOOK ROOM"),
+                    ),
+                  ),
+
+                if (room.status == "EMPTY") ...[
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: SizedBox(
+                      height: 36,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            room.status = "CLOSED";
+                            room.faultReason = "Technical Fault";
+                          });
+
+                          Navigator.pop(dialogContext, false);
+                        },
+                        icon: const Icon(Icons.lock_outline, size: 16),
+                        label: const Text(
+                          "TEMPORARY CLOSED",
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, false);
+              },
+              child: const Text("CLOSE"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (openBooking == true && mounted) {
+      bool? bookingSaved = await showBookingDialog(context, room);
+
+      if (bookingSaved == true && mounted) {
+        setState(() {});
+      }
+    }
+  }
+
+  Future<void> addRoom() async {
+    final roomNumberController = TextEditingController();
+    final roomTypeController = TextEditingController();
+    final roomRentController = TextEditingController();
+
+    final typeFocus = FocusNode();
+    final rentFocus = FocusNode();
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        void saveRoom() {
+          final roomNumber = int.tryParse(roomNumberController.text);
+          final roomType = roomTypeController.text.trim();
+          final roomRent = int.tryParse(roomRentController.text);
+
+          if (roomNumber == null ||
+              roomType.isEmpty ||
+              roomRent == null ||
+              roomRent <= 0) {
+            return;
+          }
+
+          final roomAlreadyExists = rooms.any((room) {
+            return room.roomNumber == roomNumber;
+          });
+
+          if (roomAlreadyExists) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("Room $roomNumber already exists")),
+            );
+            return;
+          }
+
+          setState(() {
+            rooms.add(
+              Room(
+                roomNumber: roomNumber,
+                roomType: roomType,
+                normalRent: roomRent,
+              ),
+            );
+
+            rooms.sort((firstRoom, secondRoom) {
+              return firstRoom.roomNumber.compareTo(secondRoom.roomNumber);
+            });
+          });
+
+          Navigator.pop(dialogContext);
+        }
+
+        return AlertDialog(
+          title: const Text("Add New Room"),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: roomNumberController,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: "Room Number"),
+                  onSubmitted: (value) {
+                    typeFocus.requestFocus();
+                  },
+                ),
+                TextField(
+                  controller: roomTypeController,
+                  focusNode: typeFocus,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: "Room Type"),
+                  onSubmitted: (value) {
+                    rentFocus.requestFocus();
+                  },
+                ),
+                TextField(
+                  controller: roomRentController,
+                  focusNode: rentFocus,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(
+                    labelText: "Normal Rent Per Day",
+                  ),
+                  onSubmitted: (value) {
+                    saveRoom();
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text("CANCEL"),
+            ),
+            ElevatedButton.icon(
+              onPressed: saveRoom,
+              icon: const Icon(Icons.add),
+              label: const Text("ADD ROOM"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> deleteRoom() async {
+    final emptyRooms = rooms.where((room) {
+      return room.status == "EMPTY";
+    }).toList();
+
+    if (emptyRooms.isEmpty) {
+      return;
+    }
+
+    Room? selectedRoom;
+
+    final roomSelected = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter updateDialog) {
+            return AlertDialog(
+              title: const Text("Select Room To Delete"),
+              content: SizedBox(
+                width: 420,
+                child: DropdownButtonFormField<Room>(
+                  decoration: const InputDecoration(
+                    labelText: "Select EMPTY Room",
+                    border: OutlineInputBorder(),
+                  ),
+                  items: emptyRooms.map((room) {
+                    return DropdownMenuItem<Room>(
+                      value: room,
+                      child: Text("Room ${room.roomNumber} - ${room.roomType}"),
+                    );
+                  }).toList(),
+                  onChanged: (Room? room) {
+                    updateDialog(() {
+                      selectedRoom = room;
+                    });
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext, false);
+                  },
+                  child: const Text("CANCEL"),
+                ),
+                ElevatedButton.icon(
+                  onPressed: selectedRoom == null
+                      ? null
+                      : () {
+                          Navigator.pop(dialogContext, true);
+                        },
+                  icon: const Icon(Icons.delete),
+                  label: const Text("DELETE"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (roomSelected != true || selectedRoom == null || !mounted) {
+      return;
+    }
+
+    final room = selectedRoom!;
+
+    final deleteConfirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text("Delete Room?"),
+          content: Text(
+            "Are you sure you want to delete Room ${room.roomNumber}?",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, false);
+              },
+              child: const Text("NO"),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext, true);
+              },
+              icon: const Icon(Icons.delete_forever),
+              label: const Text("YES, DELETE"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (deleteConfirmed == true && mounted) {
+      setState(() {
+        rooms.remove(room);
+      });
+    }
+  }
+
+  Future<void> editRoom() async {
+    final editableRooms = rooms.where((room) {
+      return room.status == "EMPTY";
+    }).toList();
+
+    if (editableRooms.isEmpty) {
+      return;
+    }
+
+    Room? selectedRoom;
+
+    bool? roomSelected = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter updateDialog) {
+            return AlertDialog(
+              title: const Text("Select Room To Edit"),
+              content: SizedBox(
+                width: 420,
+                child: DropdownButtonFormField<Room>(
+                  decoration: const InputDecoration(
+                    labelText: "Select EMPTY Room",
+                    border: OutlineInputBorder(),
+                  ),
+                  items: editableRooms.map((room) {
+                    return DropdownMenuItem<Room>(
+                      value: room,
+                      child: Text("Room ${room.roomNumber} - ${room.roomType}"),
+                    );
+                  }).toList(),
+                  onChanged: (Room? room) {
+                    updateDialog(() {
+                      selectedRoom = room;
+                    });
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext, false);
+                  },
+                  child: const Text("CANCEL"),
+                ),
+                ElevatedButton.icon(
+                  onPressed: selectedRoom == null
+                      ? null
+                      : () {
+                          Navigator.pop(dialogContext, true);
+                        },
+                  icon: const Icon(Icons.edit),
+                  label: const Text("EDIT"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (roomSelected != true || selectedRoom == null || !mounted) {
+      return;
+    }
+
+    final room = selectedRoom!;
+
+    final roomNumberController = TextEditingController(
+      text: room.roomNumber.toString(),
+    );
+    final roomTypeController = TextEditingController(text: room.roomType);
+    final roomRentController = TextEditingController(
+      text: room.normalRent.toString(),
+    );
+
+    final typeFocus = FocusNode();
+    final rentFocus = FocusNode();
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        void saveRoomChanges() {
+          final roomNumber = int.tryParse(roomNumberController.text);
+          final roomType = roomTypeController.text.trim();
+          final roomRent = int.tryParse(roomRentController.text);
+
+          if (roomNumber == null ||
+              roomType.isEmpty ||
+              roomRent == null ||
+              roomRent <= 0) {
+            return;
+          }
+
+          final roomAlreadyExists = rooms.any((otherRoom) {
+            return otherRoom != room && otherRoom.roomNumber == roomNumber;
+          });
+
+          if (roomAlreadyExists) {
+            return;
+          }
+
+          setState(() {
+            room.roomNumber = roomNumber;
+            room.roomType = roomType;
+            room.normalRent = roomRent;
+            room.bookingRate = roomRent;
+            room.futureBookingRate = roomRent;
+
+            rooms.sort((firstRoom, secondRoom) {
+              return firstRoom.roomNumber.compareTo(secondRoom.roomNumber);
+            });
+          });
+
+          Navigator.pop(dialogContext);
+        }
+
+        return AlertDialog(
+          title: Text("Edit Room ${room.roomNumber}"),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: roomNumberController,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: "Room Number"),
+                  onSubmitted: (value) {
+                    typeFocus.requestFocus();
+                  },
+                ),
+                TextField(
+                  controller: roomTypeController,
+                  focusNode: typeFocus,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: "Room Type"),
+                  onSubmitted: (value) {
+                    rentFocus.requestFocus();
+                  },
+                ),
+                TextField(
+                  controller: roomRentController,
+                  focusNode: rentFocus,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(
+                    labelText: "Normal Rent Per Day",
+                  ),
+                  onSubmitted: (value) {
+                    saveRoomChanges();
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text("CANCEL"),
+            ),
+            ElevatedButton.icon(
+              onPressed: saveRoomChanges,
+              icon: const Icon(Icons.save),
+              label: const Text("SAVE CHANGES"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> freshHotelStart() async {
+    final bool confirmed = await showFreshHotelStartDialog(context);
+
+    if (!confirmed || !mounted) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.remove("silver_cloud_bills");
+    await prefs.remove("hotel_customers");
+    await prefs.remove("silver_cloud_expenses");
+
+    BillStore.bills.clear();
+    CustomerStore.customers.clear();
+    ExpenseStore.expenses.clear();
+
+    setState(() {
+      for (final Room room in rooms) {
+        room.status = "EMPTY";
+        room.faultReason = "";
+
+        room.mobile = "";
+        room.guestName = "";
+        room.idNumber = "";
+
+        room.bookingRate = room.normalRent;
+        room.bookingDate = null;
+        room.bookingTime = null;
+        room.checkoutTime = null;
+        room.days = 0;
+        room.advance = 0;
+        room.paymentMode = "";
+
+        room.futureBooking = false;
+        room.futureMobile = "";
+        room.futureGuestName = "";
+        room.futureIdNumber = "";
+        room.futureBookingRate = room.normalRent;
+        room.futureBookingDate = null;
+        room.futureDays = 0;
+        room.futureAdvance = 0;
+        room.futurePaymentMode = "";
+
+        room.charges = [];
+        room.partPayments = [];
+        room.extraGuests = [];
+        room.futureExtraGuests = [];
+      }
+    });
+
+    await saveRooms();
+
+    if (!mounted) {
+      return;
+    }
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext successContext) {
+        return AlertDialog(
+          title: const Text("FRESH HOTEL START COMPLETE"),
+          content: const Text(
+            "All test data has been cleared successfully.\n\n"
+            "Silver Cloud Hotel is now ready for fresh real data.",
+          ),
+          actions: [
+            ElevatedButton(
+              autofocus: true,
+              onPressed: () {
+                Navigator.pop(successContext);
+              },
+              child: const Text("OK"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget summaryBox(String title, int number, Color color) {
+    return Container(
+      width: 120,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          Text(
+            "$number",
+            style: TextStyle(
+              color: color,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(title),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(HotelSettingsStore.hotelName),
+        actions: [
+          IconButton(
+            tooltip: "ADD ROOM",
+            onPressed: addRoom,
+            icon: const Icon(Icons.add),
+          ),
+          IconButton(
+            tooltip: "EDIT ROOM",
+            onPressed: editRoom,
+            icon: const Icon(Icons.edit),
+          ),
+          IconButton(
+            tooltip: "CUSTOMERS",
+            onPressed: () {
+              showCustomerListDialog(context);
+            },
+            icon: const Icon(Icons.people),
+          ),
+          IconButton(
+            tooltip: "REPORTS",
+            onPressed: () {
+              showReportsDialog(context);
+            },
+            icon: const Icon(Icons.bar_chart),
+          ),
+          IconButton(
+            tooltip: "HOTEL EXPENSES",
+            onPressed: () {
+              showExpensesDialog(context);
+            },
+            icon: const Icon(Icons.account_balance_wallet_outlined),
+          ),
+          IconButton(
+            tooltip: "BACKUP / RESTORE DATA",
+            onPressed: () async {
+              await showBackupRestoreDialog(
+                context,
+                onRestoreCompleted: () async {
+                  await loadRooms();
+                  await BillStore.loadBills();
+                  await CustomerStore.loadCustomers();
+
+                  if (mounted) {
+                    setState(() {});
+                  }
+                },
+              );
+            },
+            icon: const Icon(Icons.backup_outlined),
+          ),
+          IconButton(
+            tooltip: "FRESH HOTEL START",
+            onPressed: freshHotelStart,
+            icon: const Icon(Icons.restart_alt),
+          ),
+          IconButton(
+            tooltip: "HOTEL SETTINGS",
+            onPressed: () async {
+              final bool saved =
+                  await showHotelSettingsDialog(context);
+
+              if (!context.mounted) {
+                return;
+              }
+
+              if (saved) {
+                setState(() {});
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      "HOTEL SETTINGS SAVED SUCCESSFULLY",
+                    ),
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.settings),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: IconButton(
+              tooltip: "DELETE ROOM",
+              onPressed: deleteRoom,
+              icon: const Icon(Icons.delete_outline),
+            ),
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Room Dashboard",
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 15),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                summaryBox("TOTAL", rooms.length, Colors.blueGrey),
+                summaryBox("EMPTY", countStatus("EMPTY"), Colors.green),
+                summaryBox("BOOKED", countStatus("BOOKED"), Colors.red),
+                summaryBox("CLEANING", countStatus("CLEANING"), Colors.amber),
+                summaryBox(
+                  "CLOSED",
+                  countStatus("CLOSED"),
+                  const Color(0xFF800000),
+                ),
+              ],
+            ),
+            const SizedBox(height: 25),
+            Expanded(
+              child: GridView.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 180,
+                  crossAxisSpacing: 15,
+                  mainAxisSpacing: 15,
+                  childAspectRatio: 1.10,
+                ),
+                itemCount: rooms.length,
+                itemBuilder: (BuildContext context, int index) {
+                  Room room = rooms[index];
+
+                  return InkWell(
+                    onTap: () {
+                      openRoom(room);
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: getRoomColor(room.status),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.hotel,
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              "ROOM ${room.roomNumber}",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 19,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              room.status,
+                              style: const TextStyle(color: Colors.white),
+                            ),
+
+                            if (room.status == "BOOKED" &&
+                                room.bookingTime != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                "STAY : "
+                                "${DateTime.now().difference(room.bookingTime!).inHours} H "
+                                "${DateTime.now().difference(room.bookingTime!).inMinutes % 60} M",
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+
+                            if (room.futureBooking &&
+                                room.futureBookingDate != null) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                "📅 FUTURE BOOKING • ${formatDate(room.futureBookingDate!)}",
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-12",
+  "project": "demo-hotel-pro-sync",
+  "sonyBookingsUploaded": [
+    101,
+    102
+  ],
+  "secondAuthenticatedClientRead": true,
+  "pendingBookingJournalCleared": true,
+  "secondClientRoom103RenameSent": true,
+  "sonyRenameReceivedWithin35Seconds": false,
+  "guestStorageReferencesPresent": false,
+  "observedUsbReconnects": true,
+  "pullWaitsForPhotoUploads": true,
+  "productionChanged": false,
+  "oldPhoneChanged": false,
+  "fullTwoDeviceSyncPassed": false,
+  "wifiActive": true,
+  "newRealtimeUpdateReceived": false,
+  "freshClientPhotoHashChecksPassed": 4,
+  "cloudPhotoReferences": 4,
+  "physicalReinstallRestoreTest": "not run",
+  "remainingIssue": "Production rollout, original owner recovery, physical reinstall and stable-connection latency verification remain pending.",
+  "room103BookingAndBothPhotosVerified": true,
+  "room103PhotoFrontBytes": 355492,
+  "room103PhotoBackBytes": 233709,
+  "samsungCheckoutReachedTestServer": true,
+  "room103EmptyOnBothDevicesAndServer": true,
+  "sonyReverseRoutesLostOnUsbReconnect": true,
+  "checkoutReceivedAfterReverseRoutesRestored": true,
+  "userConfirmedUpdatesVisibleOnBothPhones": true
+}

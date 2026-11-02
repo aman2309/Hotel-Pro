@@ -1,0 +1,230 @@
+import 'package:flutter/material.dart';
+
+import '../models/bill_record.dart';
+import '../stores/bill_store.dart';
+import 'bill_preview_dialog.dart';
+
+Future<void> showReportsDialog(BuildContext context) async {
+  bool isSameDay(DateTime first, DateTime second) {
+    return first.year == second.year &&
+        first.month == second.month &&
+        first.day == second.day;
+  }
+
+  String formatDateTime(DateTime date) {
+    final String day = date.day.toString().padLeft(2, "0");
+    final String month = date.month.toString().padLeft(2, "0");
+
+    int hour = date.hour;
+    final String period = hour >= 12 ? "PM" : "AM";
+
+    hour = hour % 12;
+
+    if (hour == 0) {
+      hour = 12;
+    }
+
+    final String minute = date.minute.toString().padLeft(2, "0");
+
+    return "$day-$month-${date.year} $hour:$minute $period";
+  }
+
+  final DateTime today = DateTime.now();
+
+  final List<BillRecord> todayBills =
+      BillStore.bills.where((bill) {
+        return isSameDay(bill.checkoutTime, today);
+      }).toList()..sort(
+        (first, second) => second.checkoutTime.compareTo(first.checkoutTime),
+      );
+
+  int totalRoomRevenue = 0;
+  int totalExtraCharges = 0;
+  int totalCollection = 0;
+  int cashCollection = 0;
+  int upiCollection = 0;
+  int cardCollection = 0;
+  int bankTransferCollection = 0;
+
+  for (final BillRecord bill in todayBills) {
+    totalRoomRevenue += bill.roomBill;
+    totalExtraCharges += bill.extraCharges;
+    totalCollection += bill.totalBill;
+
+    final String mode = bill.paymentMode.trim().toLowerCase();
+
+    if (mode == "cash") {
+      cashCollection += bill.totalBill;
+    } else if (mode == "upi") {
+      upiCollection += bill.totalBill;
+    } else if (mode == "card") {
+      cardCollection += bill.totalBill;
+    } else if (mode == "bank transfer") {
+      bankTransferCollection += bill.totalBill;
+    }
+  }
+
+  Widget reportBox(String title, String value, IconData icon) {
+    return Container(
+      width: 180,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade400),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 28),
+          const SizedBox(height: 7),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 3),
+          Text(title, textAlign: TextAlign.center),
+        ],
+      ),
+    );
+  }
+
+  await showDialog(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      return AlertDialog(
+        titlePadding: EdgeInsets.zero,
+        title: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: const BoxDecoration(color: Color(0xFF800000)),
+          child: const Column(
+            children: [
+              Text(
+                "SILVER CLOUD HOTEL",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                "TODAY REPORT",
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ],
+          ),
+        ),
+        content: SizedBox(
+          width: 900,
+          height: 650,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  reportBox(
+                    "TODAY BILLS",
+                    todayBills.length.toString(),
+                    Icons.receipt_long,
+                  ),
+                  reportBox("ROOM REVENUE", "₹$totalRoomRevenue", Icons.hotel),
+                  reportBox(
+                    "EXTRA CHARGES",
+                    "₹$totalExtraCharges",
+                    Icons.add_card,
+                  ),
+                  reportBox(
+                    "TOTAL COLLECTION",
+                    "₹$totalCollection",
+                    Icons.currency_rupee,
+                  ),
+                  reportBox("CASH", "₹$cashCollection", Icons.payments),
+                  reportBox("UPI", "₹$upiCollection", Icons.qr_code),
+                  reportBox("CARD", "₹$cardCollection", Icons.credit_card),
+                  reportBox(
+                    "BANK TRANSFER",
+                    "₹$bankTransferCollection",
+                    Icons.account_balance,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                "TODAY BILLS",
+                style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+              ),
+              const Divider(),
+              Expanded(
+                child: todayBills.isEmpty
+                    ? const Center(
+                        child: Text(
+                          "No Bills Found For Today",
+                          style: TextStyle(fontSize: 17),
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: todayBills.length,
+                        separatorBuilder: (BuildContext context, int index) {
+                          return const Divider();
+                        },
+                        itemBuilder: (BuildContext context, int index) {
+                          final BillRecord bill = todayBills[index];
+
+                          return ListTile(
+                            leading: const Icon(Icons.receipt_long),
+                            title: Text(
+                              "${bill.billNumber}  •  ${bill.guestName}",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(
+                              "Room ${bill.roomNumber}  •  "
+                              "${formatDateTime(bill.checkoutTime)}  •  "
+                              "${bill.paymentMode}",
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  "₹${bill.totalBill}",
+                                  style: const TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(width: 15),
+                                ElevatedButton.icon(
+                                  onPressed: () async {
+                                    await showBillPreviewDialog(
+                                      dialogContext,
+                                      bill,
+                                    );
+                                  },
+                                  icon: const Icon(Icons.visibility),
+                                  label: const Text("VIEW BILL"),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () {
+              Navigator.pop(dialogContext);
+            },
+            child: const Text("CLOSE"),
+          ),
+        ],
+      );
+    },
+  );
+}

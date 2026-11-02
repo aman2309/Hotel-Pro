@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-10",
+  "project": "yankees-hotel-pro",
+  "productionApplicationWrites": false,
+  "productionRulesChanged": false,
+  "migrationRun": false,
+  "deployedRulesBackupVerified": true,
+  "apkBuild": "1.0.7+14",
+  "package": "com.hotelpro1.app",
+  "matchesPriorLocalSigningCertificate": true,
+  "attachedAndroidDevices": 0,
+  "ownerAudit": "Mapping verified through Firebase Auth UID; current and legacy business reviewed",
+  "localPhpCompleteness": "Not verified; no phone export or read-only PHP database export",
+  "auditScriptSyntax": "passed",
+  "cloudHistory": "Bookings/guests/bills/payments soft-deleted; reviewed recovery needed",
+  "cloudLicense": "Absent in both owned business paths",
+  "photoBackup": "2 JPEG objects privately backed up; deleted guest references; legacy hash mismatch",
+  "rolloutReady": false
+}

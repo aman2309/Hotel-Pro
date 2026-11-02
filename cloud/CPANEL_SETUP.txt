@@ -1,0 +1,29 @@
+Hotel Pro 1 — cPanel upload (2ndhealing.com)
+============================================
+Sale APK: 10-day trial + 10 store PINs (each PIN = alag cloud store)
+
+Desk par:
+  Desktop/HotelPro1.apk
+  Desktop/HotelPro1_KEYS.txt     (10 store PINs — gupt rakhein)
+  Desktop/HotelPro1_cPanel_Upload.zip
+
+cPanel extra (Silver Cloud / Branch Pro files MAT chhedo):
+  public_html/api/hotelpro1_store.php
+  public_html/api/hotelpro1_pin_hashes.php
+  Same folder as silver_cloud_store.php + config.php
+  Naya config.php MAT banao.
+  Table alag: hotelpro1_stores (10 rows, ek PIN ek store)
+
+1) Zip extract karke ye 2 files upload:
+     public_html/api/hotelpro1_store.php
+     public_html/api/hotelpro1_pin_hashes.php
+
+2) Check
+   https://2ndhealing.com/api/hotelpro1_store.php
+   → bina key 401 unauthorized JSON = live
+
+3) Phone
+   Purana Hotel Silver Cloud uninstall MAT karo (woh alag app hai)
+   Naya HotelPro1.apk install karo
+   10 din trial local
+   Store PIN daalte hi us PIN ki alag cloud store khulti hai

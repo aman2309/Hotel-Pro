@@ -1,0 +1,22 @@
+{
+  "projects": {
+    "default": "planning-with-ai-881ba"
+  },
+  "targets": {
+    "planning-with-ai-881ba": {
+      "hosting": {
+        "hotel": [
+          "hotel-silver-cloud"
+        ]
+      }
+    },
+    "yankees-hotel-pro": {
+      "storage": {
+        "rules": [
+          "yankees-hotel-pro.firebasestorage.app"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

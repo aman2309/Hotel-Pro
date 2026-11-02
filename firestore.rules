@@ -1,0 +1,150 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnerUid(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isBusinessOwner(businessId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/businesses/$(businessId)) &&
+        get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid
+          == request.auth.uid;
+    }
+
+    function isLicensedOwner(businessId) {
+      let license = /databases/$(database)/documents/businesses/$(businessId)/settings/license;
+      return isBusinessOwner(businessId) && exists(license) && (
+        (get(license).data.expiresAt is timestamp &&
+          request.time < get(license).data.expiresAt) ||
+        (get(license).data.activated != true &&
+          get(license).data.trialStart is timestamp &&
+          request.time < get(license).data.trialStart + duration.value(10, 'd'))
+      );
+    }
+
+    match /phoneIndex/{phoneKey} {
+      allow get: if signedIn() &&
+        request.auth.token.phone_number == ('+' + phoneKey);
+      allow list: if false;
+      allow create: if signedIn()
+        && request.auth.token.phone_number == ('+' + phoneKey)
+        && request.resource.data.businessId is string
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.phoneNumber == ('+' + phoneKey)
+        && getAfter(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.ownerUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /licenseKeys/{keyId} {
+      allow read, write: if false;
+    }
+
+    match /licenseAttempts/{attemptId} {
+      allow read, write: if false;
+    }
+
+    match /users/{uid} {
+      allow get: if isOwnerUid(uid);
+      allow list: if false;
+      allow create: if isOwnerUid(uid)
+        && request.resource.data.role == 'owner'
+        && request.resource.data.businessId is string
+        && request.resource.data.phoneNumber is string
+        && request.resource.data.businessId != request.resource.data.phoneNumber
+        && (getAfter(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.ownerUid == request.auth.uid);
+      allow update: if isOwnerUid(uid)
+        && request.resource.data.role == 'owner'
+        && request.resource.data.businessId == resource.data.businessId
+        && request.resource.data.phoneNumber == request.auth.token.phone_number;
+      allow delete: if false;
+    }
+
+    match /businesses/{businessId} {
+      allow get: if signedIn() && (resource == null || resource.data.ownerUid == request.auth.uid);
+      // Legacy owner lookup is limited to queries constrained by ownerUid.
+      allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && !request.resource.data.keys().hasAny(['dataResetAt'])
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId
+        && request.resource.data.phoneNumber == request.auth.token.phone_number
+        && request.resource.data.businessName is string;
+      allow update: if isBusinessOwner(businessId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['businessName', 'phoneNumber', 'updatedAt'])
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.phoneNumber == request.auth.token.phone_number;
+      allow delete: if false;
+
+      match /rooms/{roomId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create, update: if isLicensedOwner(businessId) && request.resource.data.schemaVersion == 3;
+        allow delete: if false;
+      }
+      match /bookings/{bookingId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create, update: if isLicensedOwner(businessId) && request.resource.data.schemaVersion == 3;
+        allow delete: if false;
+      }
+      match /guests/{guestId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create, update: if isLicensedOwner(businessId) && request.resource.data.schemaVersion == 3;
+        allow delete: if false;
+      }
+      match /bills/{billId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create, update: if isLicensedOwner(businessId) && request.resource.data.schemaVersion == 3;
+        allow delete: if false;
+      }
+      match /payments/{paymentId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create, update: if isLicensedOwner(businessId) && request.resource.data.schemaVersion == 3;
+        allow delete: if false;
+      }
+      match /futureBookings/{bookingId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create, update: if isLicensedOwner(businessId) && request.resource.data.schemaVersion == 3;
+        allow delete: if false;
+      }
+      match /expenses/{expenseId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create, update: if isLicensedOwner(businessId) && request.resource.data.schemaVersion == 3;
+        allow delete: if false;
+      }
+      match /settings/{settingId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create: if isBusinessOwner(businessId) && settingId != 'license' && settingId != 'onboarding' && (settingId == 'license' || isLicensedOwner(businessId)) && (settingId == 'sync' || (settingId != 'license' && request.resource.data.schemaVersion == 3) || (settingId == 'license' && (
+          request.resource.data.trialStart is timestamp
+          && request.resource.data.trialStart <= request.time
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.businessId == businessId
+          && request.resource.data.trialStart ==
+            (get(/databases/$(database)/documents/businesses/$(businessId)).data.keys().hasAny(['dataResetAt'])
+              ? get(/databases/$(database)/documents/businesses/$(businessId)).data.dataResetAt
+              : get(/databases/$(database)/documents/businesses/$(businessId)).data.createdAt)
+          && request.resource.data.activated == false
+        )));
+        allow update: if isBusinessOwner(businessId) && settingId != 'license' && settingId != 'onboarding' && (settingId == 'license' || isLicensedOwner(businessId)) && (settingId == 'sync' || (settingId != 'license' && request.resource.data.schemaVersion == 3) || (settingId == 'license' && (
+          request.resource.data.trialStart == resource.data.trialStart
+          && request.resource.data.activated == resource.data.activated
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
+        )));
+        allow delete: if isBusinessOwner(businessId) && settingId != 'license';
+      }
+      match /closedRooms/{recordId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create, update: if isLicensedOwner(businessId) && request.resource.data.schemaVersion == 3;
+        allow delete: if false;
+      }
+      match /extraCharges/{chargeId} {
+        allow read: if isBusinessOwner(businessId);
+        allow create, update: if isLicensedOwner(businessId) && request.resource.data.schemaVersion == 3;
+        allow delete: if false;
+      }
+    }
+  }
+}

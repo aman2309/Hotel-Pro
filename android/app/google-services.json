@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "731313332286",
+    "project_id": "yankees-hotel-pro",
+    "storage_bucket": "yankees-hotel-pro.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:731313332286:android:b27b800afa2dc084d4716f",
+        "android_client_info": {
+          "package_name": "com.hotelpro1.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDluaE9ZCxnDcRlW-HwFIuSDJnBUEbQjFU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

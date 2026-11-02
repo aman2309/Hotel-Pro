@@ -1,0 +1,14 @@
+[
+  {"roomNumber": 101, "roomType": "Deluxe", "normalRent": 1500},
+  {"roomNumber": 102, "roomType": "Luxury", "normalRent": 2000},
+  {"roomNumber": 103, "roomType": "Deluxe", "normalRent": 1500},
+  {"roomNumber": 104, "roomType": "Luxury", "normalRent": 2000},
+  {"roomNumber": 105, "roomType": "Deluxe", "normalRent": 1500},
+  {"roomNumber": 106, "roomType": "Luxury", "normalRent": 2000},
+  {"roomNumber": 107, "roomType": "Deluxe", "normalRent": 1500},
+  {"roomNumber": 108, "roomType": "Suite", "normalRent": 2500},
+  {"roomNumber": 109, "roomType": "Deluxe", "normalRent": 1500},
+  {"roomNumber": 110, "roomType": "Luxury", "normalRent": 2000},
+  {"roomNumber": 111, "roomType": "Deluxe", "normalRent": 1500},
+  {"roomNumber": 112, "roomType": "Suite", "normalRent": 2500}
+]

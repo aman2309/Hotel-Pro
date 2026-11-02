@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-11",
+  "flutter_sync_tests": {
+    "pass": 36,
+    "fail": 0
+  },
+  "firebase_local_tests": {
+    "pass": 10,
+    "fail": 0
+  },
+  "targeted_test_build_analyze": "no issues",
+  "project": "demo-hotel-pro-sync",
+  "production_changed": false,
+  "physical_phone_changed": false,
+  "native_android_manual_sync_restore": "room listener verified; booking/payment/offline/reinstall/photo manual flows pending",
+  "apk_sha256": "256d1be165e22a467c1bad408e3bc441871ca2332182c1ed955b08fa8933eb43",
+  "android_test_package": "com.hotelpro1.app.synctest",
+  "android_install": "Success",
+  "android_boot_completed": true,
+  "android_login_screen_verified": true,
+  "routing_checks": {
+    "demo_options": true,
+    "all_three_local_endpoints": true,
+    "native_init_provider_removed": true,
+    "production_bucket_string_in_debug_kernel": "old diagnostic expected-bucket log only; no instanceFor/bucket routing"
+  },
+  "local_http_fix": "base cleartext denied; domain 10.0.2.2 explicitly allowed in separate test build",
+  "native_test_login": "user entered local OTP successfully",
+  "native_listener_check": "3 create-only local test rooms appeared in Android UI without relaunch"
+}

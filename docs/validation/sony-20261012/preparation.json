@@ -1,0 +1,11 @@
+{
+  "model": "XQ-CT72",
+  "android": "14",
+  "package": "com.hotelpro1.app.synctest",
+  "project": "demo-hotel-pro-sync",
+  "endpoints": "127.0.0.1; adb reverse 19099/18080/19199",
+  "apkSha256": "d1d7c68c11f2653bb7aa049fac9e561e2ca142f035b9545e158984e591f68948",
+  "productionChanged": false,
+  "oldPhoneChanged": false,
+  "automaticHostMapping": false
+}

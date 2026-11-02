@@ -1,0 +1,12 @@
+{
+  "cloudCopiesAndPhotosHashed": true,
+  "sharedIdenticalRoomIds": 12,
+  "uniqueBillIds": 3,
+  "duplicatePaymentCandidatePairs": 3,
+  "photoGuestLinksVerifiedByMetadata": 2,
+  "intentProven": false,
+  "localBackupAcquired": false,
+  "phpExportAcquired": false,
+  "phoneConnected": false,
+  "productionMutations": false
+}

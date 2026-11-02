@@ -1,0 +1,17 @@
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=Hotel Pro 1, OU=Hotel, O=Hotel Pro, L=Gwalior, ST=MP, C=IN
+Signer #1 certificate SHA-256 digest: bafcba1c4782d36bfd4d967c50a9b371b76944b87fb770a1308ea0f569b3880d
+Signer #1 certificate SHA-1 digest: 36816772020446a5e9271d81ea83eaff03f068cc
+Signer #1 certificate MD5 digest: 720bd8a788a3b3b46b7a97edb74d7262
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: b4439526da0e31bff774dd3c2e79af6e4332417d694115c764157b9b9245be18
+Signer #1 public key SHA-1 digest: 5ec93db8065bbaf37bb98b17935b92863b629b1d
+Signer #1 public key MD5 digest: f2c5440966ecdaae12c7047cb439e468

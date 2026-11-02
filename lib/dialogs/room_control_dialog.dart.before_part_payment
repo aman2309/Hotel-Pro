@@ -1,0 +1,300 @@
+import 'package:flutter/material.dart';
+
+import '../models/room.dart';
+import 'booking_view_dialog.dart';
+
+Future<String?> showRoomControlDialog(BuildContext context, Room room) {
+  int roomBill() {
+    return room.bookingRate * room.days;
+  }
+
+  int extraCharges() {
+    int total = 0;
+
+    for (final charge in room.charges) {
+      total += charge["amount"] as int;
+    }
+
+    return total;
+  }
+
+  int totalBill() {
+    return roomBill() + extraCharges();
+  }
+
+  int balance() {
+    return totalBill() - room.advance;
+  }
+
+  return showDialog<String>(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      return StatefulBuilder(
+        builder: (BuildContext context, StateSetter updateDialog) {
+          Future<void> addBilling() async {
+            final chargeNameController = TextEditingController();
+
+            final amountController = TextEditingController();
+
+            final amountFocus = FocusNode();
+
+            bool? chargeSaved = await showDialog<bool>(
+              context: dialogContext,
+              builder: (BuildContext billingContext) {
+                void saveCharge() {
+                  String chargeName = chargeNameController.text.trim();
+
+                  int amount = int.tryParse(amountController.text) ?? 0;
+
+                  if (chargeName.isEmpty || amount <= 0) {
+                    return;
+                  }
+
+                  room.charges.add({"name": chargeName, "amount": amount});
+
+                  Navigator.pop(billingContext, true);
+                }
+
+                return AlertDialog(
+                  title: const Text("Add Billing / Charge"),
+                  content: SizedBox(
+                    width: 400,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextField(
+                          controller: chargeNameController,
+                          autofocus: true,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: "Charge Name",
+                            hintText: "Food / Spa / Laundry",
+                          ),
+                          onSubmitted: (value) {
+                            amountFocus.requestFocus();
+                          },
+                        ),
+                        TextField(
+                          controller: amountController,
+                          focusNode: amountFocus,
+                          keyboardType: TextInputType.number,
+                          textInputAction: TextInputAction.done,
+                          decoration: const InputDecoration(
+                            labelText: "Amount",
+                          ),
+                          onSubmitted: (value) {
+                            saveCharge();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(billingContext, false);
+                      },
+                      child: const Text("CANCEL"),
+                    ),
+                    ElevatedButton(
+                      onPressed: saveCharge,
+                      child: const Text("ADD CHARGE"),
+                    ),
+                  ],
+                );
+              },
+            );
+
+            if (chargeSaved == true) {
+              updateDialog(() {});
+            }
+          }
+
+          void viewBill() {
+            showDialog(
+              context: dialogContext,
+              builder: (BuildContext billContext) {
+                return AlertDialog(
+                  title: Text("Room ${room.roomNumber} Bill"),
+                  content: SizedBox(
+                    width: 430,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text("Guest : ${room.guestName}"),
+                          Text("Mobile : ${room.mobile}"),
+                          const Divider(),
+                          Text(
+                            "Room Rent : "
+                            "₹${room.bookingRate} × "
+                            "${room.days} Days",
+                          ),
+                          Text("Room Bill : ₹${roomBill()}"),
+                          const Divider(),
+                          const Text(
+                            "Extra Charges",
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          if (room.charges.isEmpty)
+                            const Text("No Extra Charges"),
+                          ...room.charges.map<Widget>((charge) {
+                            return ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(charge["name"].toString()),
+                              trailing: Text("₹${charge["amount"]}"),
+                            );
+                          }),
+                          const Divider(),
+                          Text(
+                            "TOTAL BILL : ₹${totalBill()}",
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text("ADVANCE : ₹${room.advance}"),
+                          Text(
+                            "BALANCE : ₹${balance()}",
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(billContext);
+                      },
+                      child: const Text("CLOSE"),
+                    ),
+                  ],
+                );
+              },
+            );
+          }
+
+          return AlertDialog(
+            title: Text("ROOM ${room.roomNumber}"),
+            content: SizedBox(
+              width: 480,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "● BOOKED",
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontSize: 19,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Divider(),
+                    Text("Guest Name : ${room.guestName}"),
+                    Text("Mobile : ${room.mobile}"),
+                    Text("ID Number : ${room.idNumber}"),
+                    Text("Room Type : ${room.roomType}"),
+                    Text("Room Rent : ₹${room.bookingRate} / Day"),
+                    if (room.bookingDate != null)
+                      Text(
+                        "Booking Date : "
+                        "${room.bookingDate!.day.toString().padLeft(2, "0")}-"
+                        "${room.bookingDate!.month.toString().padLeft(2, "0")}-"
+                        "${room.bookingDate!.year}",
+                      ),
+                    Text("Stay : ${room.days} Days"),
+                    const Divider(),
+                    Text(
+                      "Current Bill : ₹${totalBill()}",
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text("Advance : ₹${room.advance}"),
+                    Text(
+                      "Balance : ₹${balance()}",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: addBilling,
+                        icon: const Icon(Icons.add_card),
+                        label: const Text("ADD BILLING"),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: viewBill,
+                        icon: const Icon(Icons.receipt_long),
+                        label: const Text("VIEW BILL"),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await showBookingViewDialog(dialogContext, room);
+                        },
+                        icon: const Icon(Icons.visibility),
+                        label: const Text("VIEW BOOKING"),
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(dialogContext, "CHANGE_ROOM");
+                        },
+                        icon: const Icon(Icons.swap_horiz),
+                        label: const Text("CHANGE ROOM"),
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(dialogContext, "CHECKOUT");
+                        },
+                        icon: const Icon(Icons.payment),
+                        label: const Text("CHECKOUT & PAYMENT"),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext, "CLOSE");
+                },
+                child: const Text("CLOSE"),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}

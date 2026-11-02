@@ -1,0 +1,148 @@
+
+class Room {
+  int roomNumber;
+  String roomType;
+  int normalRent;
+  String status;
+  String faultReason;
+
+  String mobile;
+  String guestName;
+  String idNumber;
+
+  int bookingRate;
+  DateTime? bookingDate;
+  DateTime? bookingTime;
+  DateTime? checkoutTime;
+  int days;
+  int advance;
+  String paymentMode;
+
+  bool futureBooking;
+
+  String futureMobile;
+  String futureGuestName;
+  String futureIdNumber;
+
+  int futureBookingRate;
+  DateTime? futureBookingDate;
+  int futureDays;
+  int futureAdvance;
+  String futurePaymentMode;
+
+  List<Map<String, dynamic>> charges;
+  List<Map<String, dynamic>> extraGuests;
+  List<Map<String, dynamic>> futureExtraGuests;
+
+  Room({
+    required this.roomNumber,
+    required this.roomType,
+    required this.normalRent,
+    this.status = "EMPTY",
+    this.faultReason = "",
+    this.mobile = "",
+    this.guestName = "",
+    this.idNumber = "",
+    int? bookingRate,
+    this.bookingDate,
+    this.bookingTime,
+    this.checkoutTime,
+    this.days = 0,
+    this.advance = 0,
+    this.paymentMode = "",
+    this.futureBooking = false,
+    this.futureMobile = "",
+    this.futureGuestName = "",
+    this.futureIdNumber = "",
+    int? futureBookingRate,
+    this.futureBookingDate,
+    this.futureDays = 0,
+    this.futureAdvance = 0,
+    this.futurePaymentMode = "",
+    List<Map<String, dynamic>>? charges,
+    List<Map<String, dynamic>>? extraGuests,
+    List<Map<String, dynamic>>? futureExtraGuests,
+  }) : bookingRate = bookingRate ?? normalRent,
+       futureBookingRate = futureBookingRate ?? normalRent,
+       charges = charges ?? [],
+       extraGuests = extraGuests ?? [],
+       futureExtraGuests = futureExtraGuests ?? [];
+
+  Map<String, dynamic> toJson() {
+    return {
+      "roomNumber": roomNumber,
+      "roomType": roomType,
+      "normalRent": normalRent,
+      "status": status,
+      "faultReason": faultReason,
+      "mobile": mobile,
+      "guestName": guestName,
+      "idNumber": idNumber,
+      "bookingRate": bookingRate,
+      "bookingDate": bookingDate?.toIso8601String(),
+      "bookingTime": bookingTime?.toIso8601String(),
+      "checkoutTime": checkoutTime?.toIso8601String(),
+      "days": days,
+      "advance": advance,
+      "paymentMode": paymentMode,
+      "futureBooking": futureBooking,
+      "futureMobile": futureMobile,
+      "futureGuestName": futureGuestName,
+      "futureIdNumber": futureIdNumber,
+      "futureBookingRate": futureBookingRate,
+      "futureBookingDate": futureBookingDate?.toIso8601String(),
+      "futureDays": futureDays,
+      "futureAdvance": futureAdvance,
+      "futurePaymentMode": futurePaymentMode,
+      "charges": charges,
+      "extraGuests": extraGuests,
+      "futureExtraGuests": futureExtraGuests,
+    };
+  }
+
+  factory Room.fromJson(Map<String, dynamic> json) {
+    return Room(
+      roomNumber: json["roomNumber"] as int,
+      roomType: json["roomType"] as String,
+      normalRent: json["normalRent"] as int,
+      status: json["status"] as String? ?? "EMPTY",
+      faultReason: json["faultReason"] as String? ?? "",
+      mobile: json["mobile"] as String? ?? "",
+      guestName: json["guestName"] as String? ?? "",
+      idNumber: json["idNumber"] as String? ?? "",
+      bookingRate: json["bookingRate"] as int?,
+      bookingDate: json["bookingDate"] == null
+          ? null
+          : DateTime.parse(json["bookingDate"] as String),
+      bookingTime: json["bookingTime"] == null
+          ? null
+          : DateTime.parse(json["bookingTime"] as String),
+      checkoutTime: json["checkoutTime"] == null
+          ? null
+          : DateTime.parse(json["checkoutTime"] as String),
+      days: json["days"] as int? ?? 0,
+      advance: json["advance"] as int? ?? 0,
+      paymentMode: json["paymentMode"] as String? ?? "",
+      futureBooking: json["futureBooking"] as bool? ?? false,
+      futureMobile: json["futureMobile"] as String? ?? "",
+      futureGuestName: json["futureGuestName"] as String? ?? "",
+      futureIdNumber: json["futureIdNumber"] as String? ?? "",
+      futureBookingRate: json["futureBookingRate"] as int?,
+      futureBookingDate: json["futureBookingDate"] == null
+          ? null
+          : DateTime.parse(json["futureBookingDate"] as String),
+      futureDays: json["futureDays"] as int? ?? 0,
+      futureAdvance: json["futureAdvance"] as int? ?? 0,
+      futurePaymentMode: json["futurePaymentMode"] as String? ?? "",
+      charges: (json["charges"] as List<dynamic>? ?? [])
+          .map((charge) => Map<String, dynamic>.from(charge as Map))
+          .toList(),
+      extraGuests: (json["extraGuests"] as List<dynamic>? ?? [])
+          .map((guest) => Map<String, dynamic>.from(guest as Map))
+          .toList(),
+      futureExtraGuests: (json["futureExtraGuests"] as List<dynamic>? ?? [])
+          .map((guest) => Map<String, dynamic>.from(guest as Map))
+          .toList(),
+    );
+  }
+}

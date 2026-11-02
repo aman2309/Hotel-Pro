@@ -1,0 +1,13 @@
+# Block direct download of config
+<Files "config.php">
+  Require all denied
+</Files>
+<Files "config.sample.php">
+  Require all denied
+</Files>
+<Files "schema.sql">
+  Require all denied
+</Files>
+<Files "hotelpro1_pin_hashes.php">
+  Require all denied
+</Files>

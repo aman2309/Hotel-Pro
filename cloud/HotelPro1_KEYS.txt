@@ -1,0 +1,19 @@
+Hotel Pro 1 — 10 store PINs
+===========================
+Har PIN ek alag hotel cloud store hai.
+Same PIN dusre phone pe = wahi hotel data.
+Gupt rakhein. APK ke andar ye numbers nahi hain.
+
+01  19145715
+02  44843871
+03  64577105
+04  98381459
+05  16774852
+06  96116785
+07  62394806
+08  69473528
+09  86700545
+10  61408725
+
+Trial: 10 din (PIN ke bina, local only)
+PIN ke baad: cloud store alag — Silver Cloud live hotel touch nahi.

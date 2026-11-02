@@ -1,0 +1,5 @@
+{
+  "functions": { "source": "cloud/functions", "runtime": "nodejs22" },
+  "firestore": { "database": "(default)", "rules": "firestore.rules" },
+  "storage": [{ "bucket": "yankees-hotel-pro.firebasestorage.app", "rules": "storage.rules" }]
+}

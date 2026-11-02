@@ -1,0 +1,192 @@
+<?php
+/**
+ * Hotel Pro 1 — one isolated JSON store per license PIN.
+ *
+ * GET/PUT /api/hotelpro1_store.php
+ * Auth: header X-Api-Key
+ * Store: header X-Store-Id (64-char hex: PIN hash or same-login phone hash)
+ *
+ * Table: hotelpro1_stores  (Silver Cloud / Branch Pro tables touch nahi)
+ */
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Headers: Content-Type, X-Api-Key, X-Store-Id');
+header('Access-Control-Allow-Methods: GET, PUT, OPTIONS');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+  http_response_code(204);
+  exit;
+}
+
+$configFile = __DIR__ . '/config.php';
+if (!is_file($configFile)) {
+  http_response_code(500);
+  echo json_encode(['ok' => false, 'error' => 'config_missing']);
+  exit;
+}
+
+$config = require $configFile;
+$apiKey = (string)($config['api_key'] ?? '');
+$provided = $_SERVER['HTTP_X_API_KEY'] ?? '';
+if ($apiKey === '' || !hash_equals($apiKey, $provided)) {
+  http_response_code(401);
+  echo json_encode(['ok' => false, 'error' => 'unauthorized']);
+  exit;
+}
+
+$storeId = strtolower(preg_replace('/[^a-f0-9]/', '', (string)($_SERVER['HTTP_X_STORE_ID'] ?? '')));
+if (strlen($storeId) !== 64) {
+  http_response_code(403);
+  echo json_encode(['ok' => false, 'error' => 'invalid_store']);
+  exit;
+}
+
+try {
+  $pdo = new PDO(
+    'mysql:host=' . $config['db_host'] . ';dbname=' . $config['db_name'] . ';charset=utf8mb4',
+    $config['db_user'],
+    $config['db_pass'],
+    [
+      PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+      PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]
+  );
+} catch (Throwable $e) {
+  http_response_code(500);
+  echo json_encode([
+    'ok' => false,
+    'error' => 'db_connect_failed',
+    'detail' => $e->getMessage(),
+  ]);
+  exit;
+}
+
+ensureSchema($pdo);
+
+$method = $_SERVER['REQUEST_METHOD'];
+if ($method === 'GET') {
+  $row = fetchStore($pdo, $storeId);
+  echo json_encode([
+    'ok' => true,
+    'storeId' => $storeId,
+    'revision' => (int)$row['revision'],
+    'updatedAt' => $row['updated_at'],
+    'deviceId' => $row['device_id'],
+    'data' => json_decode($row['payload'], true) ?? new stdClass(),
+  ]);
+  exit;
+}
+
+if ($method === 'PUT') {
+  $raw = file_get_contents('php://input');
+  $body = json_decode($raw, true);
+  if (!is_array($body) || !array_key_exists('data', $body) || !array_key_exists('revision', $body)) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'error' => 'invalid_body']);
+    exit;
+  }
+
+  $clientRev = (int)$body['revision'];
+  $deviceId = isset($body['deviceId']) ? substr((string)$body['deviceId'], 0, 64) : null;
+  $payload = json_encode($body['data'], JSON_UNESCAPED_UNICODE);
+  if ($payload === false) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'error' => 'invalid_data']);
+    exit;
+  }
+
+  $pdo->beginTransaction();
+  try {
+    $row = fetchStoreForUpdate($pdo, $storeId);
+    $serverRev = (int)$row['revision'];
+    if ($clientRev !== $serverRev) {
+      $pdo->rollBack();
+      http_response_code(409);
+      echo json_encode([
+        'ok' => false,
+        'error' => 'conflict',
+        'storeId' => $storeId,
+        'revision' => $serverRev,
+        'updatedAt' => $row['updated_at'],
+        'deviceId' => $row['device_id'],
+        'data' => json_decode($row['payload'], true) ?? new stdClass(),
+      ]);
+      exit;
+    }
+
+    $newRev = $serverRev + 1;
+    $stmt = $pdo->prepare(
+      'UPDATE hotelpro1_stores SET revision = ?, payload = ?, updated_at = UTC_TIMESTAMP(), device_id = ? WHERE store_id = ?'
+    );
+    $stmt->execute([$newRev, $payload, $deviceId, $storeId]);
+    $pdo->commit();
+
+    $fresh = fetchStore($pdo, $storeId);
+    echo json_encode([
+      'ok' => true,
+      'storeId' => $storeId,
+      'revision' => (int)$fresh['revision'],
+      'updatedAt' => $fresh['updated_at'],
+      'deviceId' => $fresh['device_id'],
+    ]);
+  } catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+      $pdo->rollBack();
+    }
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'error' => 'save_failed', 'detail' => $e->getMessage()]);
+  }
+  exit;
+}
+
+http_response_code(405);
+echo json_encode(['ok' => false, 'error' => 'method_not_allowed']);
+
+function ensureSchema(PDO $pdo): void {
+  $pdo->exec(
+    'CREATE TABLE IF NOT EXISTS hotelpro1_stores (
+      store_id CHAR(64) NOT NULL PRIMARY KEY,
+      revision INT UNSIGNED NOT NULL DEFAULT 0,
+      payload LONGTEXT NOT NULL,
+      updated_at DATETIME NOT NULL,
+      device_id VARCHAR(64) NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+  );
+}
+
+function fetchStore(PDO $pdo, string $storeId): array {
+  $stmt = $pdo->prepare(
+    'SELECT revision, payload, updated_at, device_id FROM hotelpro1_stores WHERE store_id = ? LIMIT 1'
+  );
+  $stmt->execute([$storeId]);
+  $row = $stmt->fetch();
+  if (!$row) {
+    $ins = $pdo->prepare(
+      'INSERT INTO hotelpro1_stores (store_id, revision, payload, updated_at, device_id) VALUES (?, 0, ?, UTC_TIMESTAMP(), NULL)'
+    );
+    $ins->execute([$storeId, '{}']);
+    return [
+      'revision' => 0,
+      'payload' => '{}',
+      'updated_at' => gmdate('Y-m-d H:i:s'),
+      'device_id' => null,
+    ];
+  }
+  return $row;
+}
+
+function fetchStoreForUpdate(PDO $pdo, string $storeId): array {
+  $stmt = $pdo->prepare(
+    'SELECT revision, payload, updated_at, device_id FROM hotelpro1_stores WHERE store_id = ? LIMIT 1 FOR UPDATE'
+  );
+  $stmt->execute([$storeId]);
+  $row = $stmt->fetch();
+  if (!$row) {
+    $ins = $pdo->prepare(
+      'INSERT INTO hotelpro1_stores (store_id, revision, payload, updated_at, device_id) VALUES (?, 0, ?, UTC_TIMESTAMP(), NULL)'
+    );
+    $ins->execute([$storeId, '{}']);
+    return fetchStoreForUpdate($pdo, $storeId);
+  }
+  return $row;
+}

@@ -1,0 +1,152 @@
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/customer.dart';
+
+class CustomerStore {
+  static final List<Customer> customers = [];
+
+  static const String _customerKey = "hotel_customers";
+
+  static String _nextCustomerId() {
+    int highestNumber = 0;
+
+    for (final Customer customer in customers) {
+      final String id = customer.customerId;
+
+      if (!id.startsWith("CUST-")) {
+        continue;
+      }
+
+      final int number = int.tryParse(id.replaceFirst("CUST-", "")) ?? 0;
+
+      if (number > highestNumber) {
+        highestNumber = number;
+      }
+    }
+
+    return "CUST-${(highestNumber + 1).toString().padLeft(4, "0")}";
+  }
+
+  static Future<void> loadCustomers() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+
+    final String? savedData = prefs.getString(_customerKey);
+
+    customers.clear();
+
+    if (savedData == null || savedData.isEmpty) {
+      return;
+    }
+
+    final List<dynamic> customerList = jsonDecode(savedData);
+
+    for (final dynamic item in customerList) {
+      final Map<String, dynamic> data = Map<String, dynamic>.from(item);
+
+      customers.add(
+        Customer(
+          customerId: data["customerId"] ?? "",
+          mobile: data["mobile"] ?? "",
+          guestName: data["guestName"] ?? "",
+          idType: data["idType"] ?? "",
+          idNumber: data["idNumber"] ?? "",
+          idFrontPhotoPath:
+              data["idFrontPhotoPath"] ?? data["idPhotoPath"] ?? "",
+          idBackPhotoPath: data["idBackPhotoPath"] ?? "",
+          stayHistory: (data["stayHistory"] as List<dynamic>? ?? [])
+              .map((history) => Map<String, dynamic>.from(history as Map))
+              .toList(),
+        ),
+      );
+    }
+
+    bool customerIdAdded = false;
+
+    for (final Customer customer in customers) {
+      if (customer.customerId.isEmpty) {
+        customer.customerId = _nextCustomerId();
+        customerIdAdded = true;
+      }
+    }
+
+    if (customerIdAdded) {
+      await _saveCustomersToDisk();
+    }
+  }
+
+  static Customer? findByMobile(String mobile) {
+    final String cleanMobile = mobile.trim();
+
+    for (final Customer customer in customers) {
+      if (customer.mobile == cleanMobile) {
+        return customer;
+      }
+    }
+
+    return null;
+  }
+
+  static Future<void> saveCustomer(Customer customer) async {
+    Customer? oldCustomer = findByMobile(customer.mobile);
+
+    if (oldCustomer == null) {
+      if (customer.customerId.isEmpty) {
+        customer.customerId = _nextCustomerId();
+      }
+
+      customers.add(customer);
+    } else {
+      oldCustomer.guestName = customer.guestName;
+      oldCustomer.idType = customer.idType;
+      oldCustomer.idNumber = customer.idNumber;
+
+      if (customer.idFrontPhotoPath.isNotEmpty) {
+        oldCustomer.idFrontPhotoPath = customer.idFrontPhotoPath;
+      }
+
+      if (customer.idBackPhotoPath.isNotEmpty) {
+        oldCustomer.idBackPhotoPath = customer.idBackPhotoPath;
+      }
+    }
+
+    await _saveCustomersToDisk();
+  }
+
+  static Future<void> addStayHistory(
+    String mobile,
+    Map<String, dynamic> history,
+  ) async {
+    final Customer? customer = findByMobile(mobile);
+
+    if (customer == null) {
+      return;
+    }
+
+    customer.stayHistory.add(Map<String, dynamic>.from(history));
+
+    await _saveCustomersToDisk();
+  }
+
+  static Future<void> _saveCustomersToDisk() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+
+    final List<Map<String, dynamic>> customerList = customers.map((
+      Customer customer,
+    ) {
+      return {
+        "customerId": customer.customerId,
+        "mobile": customer.mobile,
+        "guestName": customer.guestName,
+        "idType": customer.idType,
+        "idNumber": customer.idNumber,
+        "idFrontPhotoPath": customer.idFrontPhotoPath,
+        "idBackPhotoPath": customer.idBackPhotoPath,
+        "stayHistory": customer.stayHistory,
+      };
+    }).toList();
+
+    await prefs.setString(_customerKey, jsonEncode(customerList));
+  }
+}

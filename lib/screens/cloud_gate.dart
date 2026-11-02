@@ -1,0 +1,207 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+import '../services/hotel_cloud_sync_service.dart';
+import '../services/hotel_firestore_service.dart';
+import '../services/hotel_onboarding_service.dart';
+import '../services/hotel_license_policy.dart';
+import '../services/license_service.dart';
+import '../services/phone_auth_service.dart';
+import '../stores/bill_store.dart';
+import '../stores/customer_store.dart';
+import '../stores/expense_store.dart';
+import '../stores/hotel_settings_store.dart';
+import 'phone_login_screen.dart';
+import 'room_dashboard.dart';
+
+enum _GatePhase { loading, login, failed, expired, ready, desktop }
+
+/// Android startup: phone auth, owner mapping, then cloud restore.
+/// A failed read stays on this screen and is never shown as an empty hotel.
+class CloudGate extends StatefulWidget {
+  const CloudGate({super.key, required this.firebaseReady});
+
+  final bool firebaseReady;
+
+  @override
+  State<CloudGate> createState() => _CloudGateState();
+}
+
+class _CloudGateState extends State<CloudGate> {
+  StreamSubscription<User?>? _authSub;
+  int _ticket = 0;
+  _GatePhase _phase = _GatePhase.loading;
+  String? _detail;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!Platform.isAndroid || !widget.firebaseReady) {
+      _phase = Platform.isAndroid ? _GatePhase.failed : _GatePhase.desktop;
+      _detail = Platform.isAndroid
+          ? 'Firebase did not start. Hotel data was not loaded as an empty hotel.'
+          : null;
+      return;
+    }
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((_) {
+      unawaited(_resolve());
+    });
+  }
+
+  @override
+  void dispose() {
+    unawaited(_authSub?.cancel());
+    super.dispose();
+  }
+
+  Future<void> _resolve() async {
+    final int ticket = ++_ticket;
+    setState(() {
+      _phase = _GatePhase.loading;
+      _detail = null;
+    });
+    try {
+      await PhoneAuthService.instance.waitForLoginPreparation();
+      if (!mounted || ticket != _ticket) return;
+      final User? user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        setState(() => _phase = _GatePhase.login);
+        return;
+      }
+      PhoneAuthSession.capture(user);
+      final account = await HotelFirestoreService.instance.ensureOwnerBusiness(
+        user,
+        allowCreate: false,
+      );
+      if (!mounted || ticket != _ticket) return;
+      if (account == null ||
+          HotelFirestoreService.instance.lastError != null) {
+        setState(() {
+          _phase = _GatePhase.failed;
+          _detail =
+              HotelFirestoreService.instance.lastError ??
+              'Hotel identity could not be verified. This is not an empty hotel.';
+        });
+        return;
+      }
+      PhoneAuthSession.businessId = account.businessId;
+      try {
+        await HotelOnboardingService.instance.provisionAfterLogin(account.businessId);
+      } catch (error) {
+        if (!mounted || ticket != _ticket) return;
+        setState(() {
+          _phase = _GatePhase.failed;
+          _detail =
+              'New hotel setup needs review. Retry login. No empty hotel was saved as ready.';
+        });
+        return;
+      }
+      try {
+        await HotelCloudSyncService.instance.bootstrap();
+      } catch (error) {
+        if (!mounted || ticket != _ticket) return;
+        setState(() {
+          _phase = _GatePhase.failed;
+          _detail =
+              HotelCloudSyncService.instance.lastError ??
+              'Cloud hotel could not be read. Retry. No empty hotel was created.';
+        });
+        return;
+      }
+      await LicenseService.instance.readCloudLicense(account.businessId);
+      if (!mounted || ticket != _ticket) return;
+      final LicenseService license = LicenseService.instance;
+      if (license.cloudView == HotelLicenseView.unreadable) {
+        setState(() {
+          _phase = _GatePhase.failed;
+          _detail = license.lastError;
+        });
+        return;
+      }
+      await HotelSettingsStore.loadSettings();
+      await CustomerStore.loadCustomers();
+      await BillStore.loadBills();
+      await ExpenseStore.loadExpenses();
+      if (!mounted || ticket != _ticket) return;
+      setState(() => _phase = _GatePhase.ready);
+    } catch (error) {
+      if (!mounted || ticket != _ticket) return;
+      setState(() {
+        _phase = _GatePhase.failed;
+        _detail =
+            'Cloud hotel could not be read. Retry. No empty hotel was created.\n$error';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_phase) {
+      case _GatePhase.desktop:
+        return const _Notice(
+          title: 'Android phone login',
+          body:
+              'Firebase OTP and cloud sync run on the Android app. This desktop build does not upload local hotel data and does not start a trial.',
+        );
+      case _GatePhase.login:
+        return const PhoneLoginScreen();
+      case _GatePhase.expired:
+      case _GatePhase.ready:
+        return const RoomDashboard();
+      case _GatePhase.failed:
+        return _Notice(
+          title: 'Cloud sync failed',
+          body:
+              _detail ??
+              'Cloud hotel could not be read. This is not an empty hotel.',
+          onRetry: widget.firebaseReady ? _resolve : null,
+        );
+      case _GatePhase.loading:
+        return const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        );
+    }
+  }
+}
+
+class _Notice extends StatelessWidget {
+  const _Notice({required this.title, required this.body, this.onRetry});
+
+  final String title;
+  final String body;
+  final Future<void> Function()? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(body, textAlign: TextAlign.center),
+              if (onRetry != null) ...[
+                const SizedBox(height: 24),
+                FilledButton(onPressed: onRetry, child: const Text('Retry')),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
