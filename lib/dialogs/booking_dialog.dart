@@ -850,52 +850,7 @@ Future<bool?> showBookingDialog(
                           },
                         ),
 
-                        const SizedBox(height: 15),
-
-                        const SizedBox(height: 10),
-
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: CustomButton.outlineIcon(
-                            onPressed: () {
-                              final mobileFocus = FocusNode();
-                              final nameFocus = FocusNode();
-                              final idFocus = FocusNode();
-                              final addressFocus = FocusNode();
-                              final frontFocus = FocusNode();
-                              final backFocus = FocusNode();
-
-                              updateBookingForm(() {
-                                extraGuestControllers.add({
-                                  "mobile": TextEditingController(),
-                                  "name": TextEditingController(),
-                                  "idNumber": TextEditingController(),
-                                  "address": TextEditingController(),
-                                  "mobileFocus": mobileFocus,
-                                  "nameFocus": nameFocus,
-                                  "idFocus": idFocus,
-                                  "addressFocus": addressFocus,
-                                  "frontFocus": frontFocus,
-                                  "backFocus": backFocus,
-                                  "frontPhoto": "",
-                                  "backPhoto": "",
-                                });
-                              });
-
-                              Future.delayed(
-                                const Duration(milliseconds: 100),
-                                () {
-                                  mobileFocus.requestFocus();
-                                },
-                              );
-                            },
-                            icon: const Icon(
-                              Icons.person_add_rounded,
-                              size: 18,
-                            ),
-                            label: const Text("Add guest"),
-                          ),
-                        ),
+                        const SizedBox(height: 16),
 
                         ...extraGuestControllers.asMap().entries.map((entry) {
                           final index = entry.key;
@@ -1148,6 +1103,49 @@ Future<bool?> showBookingDialog(
                             ),
                           );
                         }),
+
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: CustomButton.outlineIcon(
+                            onPressed: () {
+                              final mobileFocus = FocusNode();
+                              final nameFocus = FocusNode();
+                              final idFocus = FocusNode();
+                              final addressFocus = FocusNode();
+                              final frontFocus = FocusNode();
+                              final backFocus = FocusNode();
+
+                              updateBookingForm(() {
+                                extraGuestControllers.add({
+                                  "mobile": TextEditingController(),
+                                  "name": TextEditingController(),
+                                  "idNumber": TextEditingController(),
+                                  "address": TextEditingController(),
+                                  "mobileFocus": mobileFocus,
+                                  "nameFocus": nameFocus,
+                                  "idFocus": idFocus,
+                                  "addressFocus": addressFocus,
+                                  "frontFocus": frontFocus,
+                                  "backFocus": backFocus,
+                                  "frontPhoto": "",
+                                  "backPhoto": "",
+                                });
+                              });
+
+                              Future.delayed(
+                                const Duration(milliseconds: 100),
+                                () {
+                                  mobileFocus.requestFocus();
+                                },
+                              );
+                            },
+                            icon: const Icon(
+                              Icons.person_add_rounded,
+                              size: 18,
+                            ),
+                            label: const Text("Add guest"),
+                          ),
+                        ),
 
                         const SizedBox(height: 15),
 
