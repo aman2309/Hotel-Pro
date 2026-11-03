@@ -1,10 +1,13 @@
+import '../widgets/custom_bottom_sheet.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/hotel_data_buffer.dart';
 
 import '../services/cloud_sync_service.dart';
 import '../services/hotel_cloud_sync_service.dart';
@@ -20,11 +23,10 @@ Future<void> showBackupRestoreDialog(
 
   Future<void> createBackup(BuildContext dialogContext) async {
     try {
-      final SharedPreferences prefs =
-          await SharedPreferences.getInstance();
+      final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
 
       final Map<String, dynamic> backup = {
-        "app": "Hotel Pro 1",
+        "app": "Hotel Pro",
         "backupVersion": 1,
         "backupDateTime": DateTime.now().toIso8601String(),
         "data": {
@@ -39,9 +41,7 @@ Future<void> showBackupRestoreDialog(
         "  ",
       ).convert(backup);
 
-      final Uint8List bytes = Uint8List.fromList(
-        utf8.encode(jsonText),
-      );
+      final Uint8List bytes = Uint8List.fromList(utf8.encode(jsonText));
 
       final DateTime now = DateTime.now();
 
@@ -51,7 +51,7 @@ Future<void> showBackupRestoreDialog(
           "${now.day.toString().padLeft(2, "0")}";
 
       await FileSaver.instance.saveFile(
-        name: "Hotel_Pro_1_Backup_$date",
+        name: "Hotel_Pro_Backup_$date",
         bytes: bytes,
         fileExtension: "json",
         mimeType: MimeType.json,
@@ -62,27 +62,22 @@ Future<void> showBackupRestoreDialog(
       }
 
       ScaffoldMessenger.of(dialogContext).showSnackBar(
-        const SnackBar(
-          content: Text("BACKUP CREATED SUCCESSFULLY"),
-        ),
+        const SnackBar(content: Text("Backup created successfully")),
       );
     } catch (error) {
       if (!dialogContext.mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(dialogContext).showSnackBar(
-        SnackBar(
-          content: Text("BACKUP FAILED : $error"),
-        ),
-      );
+      ScaffoldMessenger.of(
+        dialogContext,
+      ).showSnackBar(SnackBar(content: Text("BACKUP FAILED : $error")));
     }
   }
 
   Future<void> restoreBackup(BuildContext dialogContext) async {
     try {
-      final FilePickerResult? result =
-          await FilePicker.pickFiles(
+      final FilePickerResult? result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ["json"],
         withData: true,
@@ -98,19 +93,16 @@ Future<void> showBackupRestoreDialog(
         throw Exception("Unable to read backup file");
       }
 
-      final dynamic decoded = jsonDecode(
-        utf8.decode(bytes),
-      );
+      final dynamic decoded = jsonDecode(utf8.decode(bytes));
 
       if (decoded is! Map) {
         throw Exception("Invalid backup format");
       }
 
-      final Map<String, dynamic> backup =
-          Map<String, dynamic>.from(decoded);
+      final Map<String, dynamic> backup = Map<String, dynamic>.from(decoded);
 
-      if (backup["app"] != "Hotel Pro 1") {
-        throw Exception("This is not a Hotel Pro 1 backup");
+      if (backup["app"] != "Hotel Pro" && backup["app"] != "Hotel Pro 1") {
+        throw Exception("This is not a Hotel Pro backup");
       }
 
       final dynamic rawData = backup["data"];
@@ -119,37 +111,36 @@ Future<void> showBackupRestoreDialog(
         throw Exception("Backup data is missing");
       }
 
-      final Map<String, dynamic> data =
-          Map<String, dynamic>.from(rawData);
+      final Map<String, dynamic> data = Map<String, dynamic>.from(rawData);
 
       if (!dialogContext.mounted) {
         return;
       }
 
-      final bool? confirmed = await showDialog<bool>(
+      final bool? confirmed = await showCustomBottomSheet<bool>(
         context: dialogContext,
         barrierDismissible: false,
         builder: (BuildContext confirmContext) {
-          return AlertDialog(
-            title: const Text("RESTORE FROM FILE"),
+          return CustomDialog(
+            title: const Text("Restore from file"),
             content: const Text(
               "Current Rooms, Bills, Customers and Expenses "
               "will be replaced by the selected backup file.\n\n"
               "This does not use cloud restore. Do you want to continue?",
             ),
             actions: [
-              TextButton(
+              CustomButton.text(
                 onPressed: () {
                   Navigator.pop(confirmContext, false);
                 },
-                child: const Text("CANCEL"),
+                child: const Text("Cancel"),
               ),
-              ElevatedButton.icon(
+              CustomButton.icon(
                 onPressed: () {
                   Navigator.pop(confirmContext, true);
                 },
-                icon: const Icon(Icons.restore),
-                label: const Text("RESTORE FROM FILE"),
+                icon: const Icon(Icons.restore_rounded),
+                label: const Text("Restore from file"),
               ),
             ],
           );
@@ -160,28 +151,15 @@ Future<void> showBackupRestoreDialog(
         return;
       }
 
-      final SharedPreferences prefs =
-          await SharedPreferences.getInstance();
+      final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
 
-      await prefs.setString(
-        roomKey,
-        data[roomKey]?.toString() ?? "[]",
-      );
+      await prefs.setString(roomKey, data[roomKey]?.toString() ?? "[]");
 
-      await prefs.setString(
-        billKey,
-        data[billKey]?.toString() ?? "[]",
-      );
+      await prefs.setString(billKey, data[billKey]?.toString() ?? "[]");
 
-      await prefs.setString(
-        customerKey,
-        data[customerKey]?.toString() ?? "[]",
-      );
+      await prefs.setString(customerKey, data[customerKey]?.toString() ?? "[]");
 
-      await prefs.setString(
-        expenseKey,
-        data[expenseKey]?.toString() ?? "[]",
-      );
+      await prefs.setString(expenseKey, data[expenseKey]?.toString() ?? "[]");
 
       await onRestoreCompleted();
       await CloudSyncService.markDirty();
@@ -195,62 +173,56 @@ Future<void> showBackupRestoreDialog(
       Navigator.pop(dialogContext);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            "BACKUP RESTORED SUCCESSFULLY",
-          ),
-        ),
+        const SnackBar(content: Text("Backup restored successfully")),
       );
     } catch (error) {
       if (!dialogContext.mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(dialogContext).showSnackBar(
-        SnackBar(
-          content: Text("RESTORE FAILED : $error"),
-        ),
-      );
+      ScaffoldMessenger.of(
+        dialogContext,
+      ).showSnackBar(SnackBar(content: Text("RESTORE FAILED : $error")));
     }
   }
 
-  await showDialog(
+  await showCustomBottomSheet(
     context: context,
     builder: (BuildContext dialogContext) {
-      return AlertDialog(
-        title: const Text("BACKUP / RESTORE DATA"),
+      return CustomDialog(
+        title: const Text("Backup / restore data"),
         content: const SizedBox(
           width: 500,
           child: Text(
             "BACKUP DATA saves Rooms, Bills, Customers and "
             "Hotel Expenses in one JSON backup file.\n\n"
             "RESTORE FROM FILE replaces current hotel data with "
-            "the selected Hotel Pro 1 backup file.\n\n"
+            "the selected Hotel Pro backup file.\n\n"
             "Cloud restore after Phone OTP on a new phone is automatic "
             "and does not open this file picker.",
             style: TextStyle(fontSize: 16),
           ),
         ),
         actions: [
-          OutlinedButton.icon(
+          CustomButton.outlineIcon(
             onPressed: () {
               restoreBackup(dialogContext);
             },
-            icon: const Icon(Icons.restore),
-            label: const Text("RESTORE FROM FILE"),
+            icon: const Icon(Icons.restore_rounded),
+            label: const Text("Restore from file"),
           ),
-          ElevatedButton.icon(
+          CustomButton.icon(
             onPressed: () {
               createBackup(dialogContext);
             },
-            icon: const Icon(Icons.backup),
-            label: const Text("BACKUP DATA"),
+            icon: const Icon(Icons.backup_rounded),
+            label: const Text("Backup data"),
           ),
-          TextButton(
+          CustomButton.text(
             onPressed: () {
               Navigator.pop(dialogContext);
             },
-            child: const Text("CLOSE"),
+            child: const Text("Close"),
           ),
         ],
       );

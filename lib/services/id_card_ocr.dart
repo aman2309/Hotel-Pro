@@ -75,7 +75,7 @@ class IdCardOcr {
     );
     await file.writeAsBytes(bytes, flush: true);
     try {
-      return scanFile(file.path);
+      return await scanFile(file.path);
     } finally {
       try {
         await file.delete();

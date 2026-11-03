@@ -1,3 +1,8 @@
+import '../widgets/custom_bottom_sheet.dart';
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
+import '../theme/app_theme.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -74,8 +79,10 @@ Future<void> showReportsDialog(BuildContext context) async {
     }).toList();
 
     bills.sort((first, second) {
-      final DateTime a = first.checkoutTime ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final DateTime b = second.checkoutTime ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final DateTime a =
+          first.checkoutTime ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final DateTime b =
+          second.checkoutTime ?? DateTime.fromMillisecondsSinceEpoch(0);
       return b.compareTo(a);
     });
 
@@ -123,8 +130,7 @@ Future<void> showReportsDialog(BuildContext context) async {
             : rawAmount is num
             ? rawAmount.toInt()
             : int.tryParse(rawAmount?.toString() ?? "") ?? 0;
-        final String paymentMode =
-            payment["paymentMode"]?.toString() ?? "";
+        final String paymentMode = payment["paymentMode"]?.toString() ?? "";
 
         totalPartPayments += amount;
         addPayment(paymentMode, amount);
@@ -186,34 +192,40 @@ Future<void> showReportsDialog(BuildContext context) async {
 
     final List<int> roomNumbers = roomTotals.keys.toList()..sort();
 
-    await showDialog(
+    await showCustomBottomSheet(
       context: context,
       builder: (BuildContext roomReportContext) {
-        return AlertDialog(
+        return CustomDialog(
           titlePadding: EdgeInsets.zero,
           title: Container(
             width: double.infinity,
             padding: const EdgeInsets.all(18),
-            decoration: const BoxDecoration(color: Color(0xFF800000)),
+            decoration: const BoxDecoration(color: AppColors.ink),
             child: Column(
               children: [
                 Text(
                   HotelSettingsStore.hotelName.toUpperCase(),
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: CustomColors.surface,
                     fontSize: 23,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  "ROOM-WISE REPORT",
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  "Room-wise report",
+                  style: const TextStyle(
+                    color: CustomColors.surface,
+                    fontSize: 16,
+                  ),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   "${formatDate(fromDate)} TO ${formatDate(toDate)}",
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: const TextStyle(
+                    color: CustomColors.surface,
+                    fontSize: 13,
+                  ),
                 ),
               ],
             ),
@@ -249,7 +261,7 @@ Future<void> showReportsDialog(BuildContext context) async {
                                 style: const TextStyle(
                                   fontSize: 19,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF800000),
+                                  color: AppColors.ink,
                                 ),
                               ),
                               const SizedBox(height: 8),
@@ -280,12 +292,12 @@ Future<void> showReportsDialog(BuildContext context) async {
                   ),
           ),
           actions: [
-            TextButton(
+            CustomButton.text(
               autofocus: true,
               onPressed: () {
                 Navigator.pop(roomReportContext);
               },
-              child: const Text("CLOSE"),
+              child: const Text("Close"),
             ),
           ],
         );
@@ -425,8 +437,9 @@ Future<void> showReportsDialog(BuildContext context) async {
                     1: pw.FlexColumnWidth(1.4),
                     2: pw.FlexColumnWidth(0.7),
                     3: pw.FlexColumnWidth(1.2),
-                    4: pw.FlexColumnWidth(0.8),
-                    5: pw.FlexColumnWidth(0.9),
+                    4: pw.FlexColumnWidth(1.1),
+                    5: pw.FlexColumnWidth(0.8),
+                    6: pw.FlexColumnWidth(0.9),
                   },
                   children: [
                     pw.TableRow(
@@ -436,6 +449,7 @@ Future<void> showReportsDialog(BuildContext context) async {
                             "Guest",
                             "Room",
                             "Checkout",
+                            "Duration",
                             "Mode",
                             "Amount",
                           ].map((title) {
@@ -459,6 +473,7 @@ Future<void> showReportsDialog(BuildContext context) async {
                               bill.guestName,
                               bill.roomNumber.toString(),
                               formatDateTime(bill.checkoutTime),
+                              bill.stayDurationLabel(),
                               bill.paymentMode,
                               "Rs. ${bill.totalBill}",
                             ].map((value) {
@@ -509,9 +524,9 @@ Future<void> showReportsDialog(BuildContext context) async {
       debugPrint("PRINT PDF REPORT ERROR: $error");
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("PDF print failed: $error")),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("PDF print failed: $error")));
       }
     }
   }
@@ -521,7 +536,7 @@ Future<void> showReportsDialog(BuildContext context) async {
       width: 180,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade400),
+        border: Border.all(color: CustomColors.border),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -539,7 +554,7 @@ Future<void> showReportsDialog(BuildContext context) async {
     );
   }
 
-  await showDialog(
+  await showCustomBottomSheet(
     context: context,
     builder: (BuildContext dialogContext) {
       return StatefulBuilder(
@@ -570,18 +585,18 @@ Future<void> showReportsDialog(BuildContext context) async {
                   .inDays +
               1;
 
-          return AlertDialog(
+          return CustomDialog(
             titlePadding: EdgeInsets.zero,
             title: Container(
               width: double.infinity,
               padding: const EdgeInsets.all(18),
-              decoration: const BoxDecoration(color: Color(0xFF800000)),
+              decoration: const BoxDecoration(color: AppColors.ink),
               child: Column(
                 children: [
                   Text(
                     HotelSettingsStore.hotelName.toUpperCase(),
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: CustomColors.surface,
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
                     ),
@@ -595,23 +610,26 @@ Future<void> showReportsDialog(BuildContext context) async {
                         : singleDate
                         ? "REPORT - ${formatDate(fromDate)}"
                         : "REPORT ${formatDate(fromDate)} TO ${formatDate(toDate)}",
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    style: const TextStyle(
+                      color: CustomColors.surface,
+                      fontSize: 16,
+                    ),
                   ),
                 ],
               ),
             ),
             content: SizedBox(
               width: MediaQuery.of(dialogContext).size.width * 0.92,
-              height: MediaQuery.of(dialogContext).size.height * 0.82,
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
                       Expanded(
-                        child: SizedBox(
-                          height: 40,
-                          child: ElevatedButton.icon(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 46),
+                          child: CustomButton.icon(
                             onPressed: () {
                               updateDialog(() {
                                 fromDate = DateTime.now();
@@ -624,11 +642,11 @@ Future<void> showReportsDialog(BuildContext context) async {
                               ),
                               visualDensity: VisualDensity.compact,
                             ),
-                            icon: const Icon(Icons.today, size: 16),
+                            icon: const Icon(Icons.today_rounded, size: 16),
                             label: const FittedBox(
                               fit: BoxFit.scaleDown,
                               child: Text(
-                                "TODAY",
+                                "Today",
                                 maxLines: 1,
                                 style: TextStyle(
                                   fontSize: 12,
@@ -641,9 +659,9 @@ Future<void> showReportsDialog(BuildContext context) async {
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: SizedBox(
-                          height: 40,
-                          child: ElevatedButton.icon(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 46),
+                          child: CustomButton.icon(
                             onPressed: () {
                               updateDialog(() {
                                 final DateTime day = DateTime.now().subtract(
@@ -659,11 +677,11 @@ Future<void> showReportsDialog(BuildContext context) async {
                               ),
                               visualDensity: VisualDensity.compact,
                             ),
-                            icon: const Icon(Icons.history, size: 16),
+                            icon: const Icon(Icons.history_rounded, size: 16),
                             label: const FittedBox(
                               fit: BoxFit.scaleDown,
                               child: Text(
-                                "YESTERDAY",
+                                "Yesterday",
                                 maxLines: 1,
                                 style: TextStyle(
                                   fontSize: 12,
@@ -681,14 +699,15 @@ Future<void> showReportsDialog(BuildContext context) async {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      ElevatedButton.icon(
+                      CustomButton.icon(
                         onPressed: () async {
-                          final DateTime? pickedDate = await showDatePicker(
-                            context: dialogContext,
-                            initialDate: fromDate,
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime.now(),
-                          );
+                          final DateTime? pickedDate =
+                              await showCustomDateSheet(
+                                context: dialogContext,
+                                initialDate: fromDate,
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime.now(),
+                              );
 
                           if (pickedDate != null) {
                             updateDialog(() {
@@ -700,17 +719,18 @@ Future<void> showReportsDialog(BuildContext context) async {
                             });
                           }
                         },
-                        icon: const Icon(Icons.date_range),
+                        icon: const Icon(Icons.date_range_rounded),
                         label: Text("FROM : ${formatDate(fromDate)}"),
                       ),
-                      ElevatedButton.icon(
+                      CustomButton.icon(
                         onPressed: () async {
-                          final DateTime? pickedDate = await showDatePicker(
-                            context: dialogContext,
-                            initialDate: toDate,
-                            firstDate: fromDate,
-                            lastDate: DateTime.now(),
-                          );
+                          final DateTime? pickedDate =
+                              await showCustomDateSheet(
+                                context: dialogContext,
+                                initialDate: toDate,
+                                firstDate: fromDate,
+                                lastDate: DateTime.now(),
+                              );
 
                           if (pickedDate != null) {
                             updateDialog(() {
@@ -718,10 +738,10 @@ Future<void> showReportsDialog(BuildContext context) async {
                             });
                           }
                         },
-                        icon: const Icon(Icons.event_available),
+                        icon: const Icon(Icons.event_available_rounded),
                         label: Text("TO : ${formatDate(toDate)}"),
                       ),
-                      ElevatedButton.icon(
+                      CustomButton.icon(
                         onPressed: () async {
                           await printReport(
                             dialogContext,
@@ -731,8 +751,8 @@ Future<void> showReportsDialog(BuildContext context) async {
                             totals,
                           );
                         },
-                        icon: const Icon(Icons.print),
-                        label: const Text("PRINT PDF REPORT"),
+                        icon: const Icon(Icons.print_rounded),
+                        label: const Text("Print PDF report"),
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -740,7 +760,7 @@ Future<void> showReportsDialog(BuildContext context) async {
                           vertical: 10,
                         ),
                         decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade400),
+                          border: Border.all(color: CustomColors.border),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -748,7 +768,7 @@ Future<void> showReportsDialog(BuildContext context) async {
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
-                      ElevatedButton.icon(
+                      CustomButton.icon(
                         onPressed: () async {
                           await showRoomWiseReport(
                             dialogContext,
@@ -757,8 +777,8 @@ Future<void> showReportsDialog(BuildContext context) async {
                             selectedBills,
                           );
                         },
-                        icon: const Icon(Icons.meeting_room),
-                        label: const Text("ROOM-WISE REPORT"),
+                        icon: const Icon(Icons.meeting_room_rounded),
+                        label: const Text("Room-wise report"),
                       ),
                     ],
                   ),
@@ -774,49 +794,49 @@ Future<void> showReportsDialog(BuildContext context) async {
                               ? "YESTERDAY BILLS"
                               : "TOTAL BILLS",
                           selectedBills.length.toString(),
-                          Icons.receipt_long,
+                          Icons.receipt_long_rounded,
                         ),
                         const SizedBox(width: 10),
                         reportBox(
                           "ROOM REVENUE",
                           "₹${totals["roomRevenue"]}",
-                          Icons.hotel,
+                          Icons.hotel_rounded,
                         ),
                         const SizedBox(width: 10),
                         reportBox(
                           "EXTRA CHARGES",
                           "₹${totals["extraCharges"]}",
-                          Icons.add_card,
+                          Icons.add_card_rounded,
                         ),
                         const SizedBox(width: 10),
                         reportBox(
                           "TOTAL COLLECTION",
                           "₹${totals["totalCollection"]}",
-                          Icons.currency_rupee,
+                          Icons.currency_rupee_rounded,
                         ),
                         const SizedBox(width: 10),
                         reportBox(
                           "CASH",
                           "₹${totals["cash"]}",
-                          Icons.payments,
+                          Icons.payments_rounded,
                         ),
                         const SizedBox(width: 10),
                         reportBox(
                           "UPI",
                           "₹${totals["upi"]}",
-                          Icons.qr_code,
+                          Icons.qr_code_rounded,
                         ),
                         const SizedBox(width: 10),
                         reportBox(
                           "CARD",
                           "₹${totals["card"]}",
-                          Icons.credit_card,
+                          Icons.credit_card_rounded,
                         ),
                         const SizedBox(width: 10),
                         reportBox(
                           "BANK TRANSFER",
                           "₹${totals["bankTransfer"]}",
-                          Icons.account_balance,
+                          Icons.account_balance_rounded,
                         ),
                       ],
                     ),
@@ -836,7 +856,9 @@ Future<void> showReportsDialog(BuildContext context) async {
                     ),
                   ),
                   const Divider(),
-                  Expanded(
+                  SizedBox(
+                    height: (MediaQuery.sizeOf(dialogContext).height * .5)
+                        .clamp(180.0, 400.0),
                     child: selectedBills.isEmpty
                         ? Center(
                             child: Text(
@@ -855,40 +877,51 @@ Future<void> showReportsDialog(BuildContext context) async {
                             itemBuilder: (BuildContext context, int index) {
                               final BillRecord bill = selectedBills[index];
 
-                              return ListTile(
-                                leading: const Icon(Icons.receipt_long),
-                                title: Text(
-                                  "${bill.billNumber}  •  ${bill.guestName}",
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
                                 ),
-                                subtitle: Text(
-                                  "Room ${bill.roomNumber}  •  "
-                                  "${formatDateTime(bill.checkoutTime)}  •  "
-                                  "${bill.paymentMode}",
-                                ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      "₹${bill.totalBill}",
+                                      '${bill.billNumber} · ${bill.guestName}',
                                       style: const TextStyle(
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.bold,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
-                                    const SizedBox(width: 15),
-                                    ElevatedButton.icon(
-                                      onPressed: () async {
-                                        await showBillPreviewDialog(
-                                          dialogContext,
-                                          bill,
-                                          applyGst: bill.applyGst,
-                                        );
-                                      },
-                                      icon: const Icon(Icons.visibility),
-                                      label: const Text("VIEW BILL"),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'Room ${bill.roomNumber} · ${formatDateTime(bill.checkoutTime)} · ${bill.stayDurationLabel()} · ${bill.paymentMode}',
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Wrap(
+                                      spacing: 14,
+                                      runSpacing: 10,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: [
+                                        Text(
+                                          '₹${bill.totalBill}',
+                                          style: const TextStyle(
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        CustomButton.outlineIcon(
+                                          onPressed: () =>
+                                              showBillPreviewDialog(
+                                                dialogContext,
+                                                bill,
+                                                applyGst: bill.applyGst,
+                                              ),
+                                          icon: const Icon(
+                                            Icons.visibility_rounded,
+                                            size: 18,
+                                          ),
+                                          label: const Text('View bill'),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
@@ -900,12 +933,12 @@ Future<void> showReportsDialog(BuildContext context) async {
               ),
             ),
             actions: [
-              TextButton(
+              CustomButton.text(
                 autofocus: true,
                 onPressed: () {
                   Navigator.pop(dialogContext);
                 },
-                child: const Text("CLOSE"),
+                child: const Text("Close"),
               ),
             ],
           );

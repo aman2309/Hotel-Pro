@@ -1,268 +1,165 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-
 import '../services/hotel_license_policy.dart';
 import '../services/license_service.dart';
+import '../theme/custom_colors.dart';
+import '../utils/responsive_ui.dart';
+import '../widgets/hotel_ui.dart';
+import '../widgets/app_toast.dart';
 
 class LicenseScreen extends StatefulWidget {
-  final bool locked;
-  final VoidCallback? onContinueTrial;
-  final Future<void> Function()? onActivated;
-
   const LicenseScreen({
     super.key,
     required this.locked,
     this.onContinueTrial,
     this.onActivated,
   });
-
+  final bool locked;
+  final VoidCallback? onContinueTrial;
+  final Future<void> Function()? onActivated;
   @override
   State<LicenseScreen> createState() => _LicenseScreenState();
 }
 
 class _LicenseScreenState extends State<LicenseScreen> {
-  String _pin = '';
+  final _key = TextEditingController();
   bool _busy = false;
-
-  void _tap(String d) {
-    if (_busy || _pin.length >= 8) return;
-    setState(() => _pin += d);
-    if (_pin.length == 8) {
-      unawaited(_submit());
-    }
-  }
-
-  void _back() {
-    if (_busy || _pin.isEmpty) return;
-    setState(() => _pin = _pin.substring(0, _pin.length - 1));
+  @override
+  void dispose() {
+    _key.dispose();
+    super.dispose();
   }
 
   Future<void> _submit() async {
     if (_busy) return;
-    final license = LicenseService.instance;
+    FocusScope.of(context).unfocus();
     setState(() => _busy = true);
-    var ok = false;
     try {
-      ok = await license.redeem(_pin);
+      final license = LicenseService.instance;
+      if (!await license.redeem(_key.text.trim())) {
+        if (mounted) {
+          showAppToast(
+            context,
+            license.lastError ?? 'Could not activate this key.',
+          );
+        }
+        return;
+      }
+      await widget.onActivated?.call();
+      if (mounted) {
+        showAppToast(context, 'Membership activated.', error: false);
+        if (Navigator.of(context).canPop()) Navigator.of(context).pop(true);
+      }
     } catch (_) {
-      license.reportFailure('PIN activate nahi hua.');
-    }
-    if (!mounted) return;
-    if (!ok) {
-      setState(() {
-        _busy = false;
-        _pin = '';
-      });
-      return;
-    }
-    // PIN only unlocks the app. Hotel data stays on the login-phone cPanel store.
-    await widget.onActivated?.call();
-    if (!mounted) return;
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop(true);
+      if (mounted) {
+        showAppToast(
+          context,
+          'Could not activate your key. Check internet and retry.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: LicenseService.instance,
-      builder: (context, _) {
-        final license = LicenseService.instance;
-        return Scaffold(
-          backgroundColor: const Color(0xFF1565C0),
-          body: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-              children: [
-                Center(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.asset(
-                      'assets/images/hotel_logo.png',
-                      width: 88,
-                      height: 88,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const Icon(
-                        Icons.hotel,
-                        size: 72,
-                        color: Colors.white,
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: LicenseService.instance,
+    builder: (context, _) {
+      final license = LicenseService.instance;
+      return Scaffold(
+        appBar: AppBar(title: const Text('Your membership')),
+        body: ResponsivePage(
+          maxContentWidth: 480,
+          builder: (context, ui) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Icon(
+                Icons.workspace_premium_rounded,
+                size: 60,
+                color: CustomColors.primary,
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'More great stays ahead.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 27, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Continue Hotel Pro with your license key.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: CustomColors.muted),
+              ),
+              const SizedBox(height: 24),
+              CustomSurface(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      license.cloudView == HotelLicenseView.activated
+                          ? 'Renew membership'
+                          : 'Activate membership',
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Hotel Pro 1',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  license.cloudView == HotelLicenseView.activated
-                      ? 'Annual license'
-                      : '10 din free trial',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                  LicenseService.buildStamp,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white38,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  license.statusLine,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: widget.locked
-                        ? const Color(0xFFFFCDD2)
-                        : const Color(0xFFFFE082),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  license.cloudView == HotelLicenseView.activated
-                      ? 'Renew with PIN. Purana data safe hai.'
-                      : widget.locked
-                      ? '8 digit PIN daalein. Purana data safe hai.'
-                      : 'Trial ke dauran pehli PIN se 1 saal shuru hoga.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.88),
-                    fontSize: 14,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(8, (i) {
-                    final filled = i < _pin.length;
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: filled ? const Color(0xFFFFE082) : Colors.transparent,
-                        border: Border.all(
-                          color: const Color(0xFFFFE082),
-                          width: 1.5,
+                    const SizedBox(height: 12),
+                    Text(
+                      license.statusLine,
+                      style: const TextStyle(color: CustomColors.muted),
+                    ),
+                    const SizedBox(height: 18),
+                    CustomTextField(
+                      controller: _key,
+                      enabled: !_busy,
+                      label: 'License key',
+                      icon: Icons.key_rounded,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _submit(),
+                    ),
+                    const Text(
+                      'Paste the HP-… key supplied by your administrator. Validity is added to your remaining trial or membership.',
+                      style: TextStyle(fontSize: 12, color: CustomColors.muted),
+                    ),
+                    if (license.lastError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(
+                          license.lastError!,
+                          style: const TextStyle(color: CustomColors.error),
                         ),
                       ),
-                    );
-                  }),
+                    const SizedBox(height: 20),
+                    CustomButton.icon(
+                      onPressed: _busy ? null : _submit,
+                      icon: _busy
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.verified_rounded),
+                      label: Text(_busy ? 'Activating…' : 'Activate key'),
+                    ),
+                  ],
                 ),
-                if (license.lastError != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    license.lastError!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFFFFCDD2),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 24),
-                if (_busy)
-                  const Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    ),
-                  )
-                else
-                  _LicenseKeypad(onTap: _tap, onBack: _back),
-                if (!widget.locked && widget.onContinueTrial != null) ...[
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: widget.onContinueTrial,
-                    child: Text(
-                      'Trial continue (${license.statusLine})',
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _LicenseKeypad extends StatelessWidget {
-  final void Function(String) onTap;
-  final VoidCallback onBack;
-  const _LicenseKeypad({required this.onTap, required this.onBack});
-
-  @override
-  Widget build(BuildContext context) {
-    const keys = [
-      ['1', '2', '3'],
-      ['4', '5', '6'],
-      ['7', '8', '9'],
-      ['', '0', '⌫'],
-    ];
-    return Column(
-      children: keys.map((row) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: row.map((k) {
-              if (k.isEmpty) return const SizedBox(width: 72, height: 56);
-              return InkWell(
-                onTap: () => k == '⌫' ? onBack() : onTap(k),
-                borderRadius: BorderRadius.circular(28),
-                child: Container(
-                  width: 72,
-                  height: 56,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.14),
-                    ),
-                  ),
-                  child: Text(
-                    k,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+              ),
+              if (!widget.locked && widget.onContinueTrial != null)
+                TextButton(
+                  onPressed: _busy ? null : widget.onContinueTrial,
+                  child: const Text('Continue trial'),
                 ),
-              );
-            }).toList(),
+              const SizedBox(height: 20),
+              const Text(
+                'Your hotel data stays connected to your Firebase account.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: CustomColors.muted),
+              ),
+            ],
           ),
-        );
-      }).toList(),
-    );
-  }
+        ),
+      );
+    },
+  );
 }

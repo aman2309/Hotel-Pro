@@ -58,3 +58,6 @@ backend/reports/
 tools/firebase_tests/node_modules/
 cloud/functions/node_modules/
 *-debug.log
+
+# Firebase local deployment caches.
+.firebase/

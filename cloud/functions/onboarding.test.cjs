@@ -2,8 +2,7 @@ const {test, after} = require('node:test');
 const assert = require('node:assert/strict');
 const {initializeApp, deleteApp} = require('firebase-admin/app');
 const {getFirestore, Timestamp} = require('firebase-admin/firestore');
-const {provisionHotel} = require('./onboarding');
-const {DEFAULT_ROOMS} = require('./default_rooms');
+const {provisionHotel, DEFAULT_ROOM_NUMBERS} = require('./onboarding');
 
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:18080') throw Error('Local emulator only');
 const app = initializeApp({projectId: 'demo-hotel-pro-sync'}, 'onboarding-tests');
@@ -15,7 +14,7 @@ async function identity(uid, phone, business) {
   await db.doc(`businesses/${uid}`).set({ownerUid: uid, phoneNumber: phone, ...business});
 }
 
-test('a new owner gets 12 empty default rooms and one server trial', async () => {
+test('a new owner gets exactly twelve standard rooms and one server trial', async () => {
   const uid = `new${Date.now()}`;
   const now = Date.parse('2026-10-23T06:00:00.000Z');
   await identity(uid, uid, {onboardingStatus: 'pending', newOwnerSetup: true, createdAt: Timestamp.fromMillis(now)});
@@ -31,13 +30,15 @@ test('a new owner gets 12 empty default rooms and one server trial', async () =>
   assert.equal(license.activated, false);
   const rooms = await db.collection(`businesses/${uid}/rooms`).get();
   assert.equal(rooms.size, 12);
-  for (const spec of DEFAULT_ROOMS) {
-    const data = rooms.docs.find((doc) => doc.id === `room_${spec.roomNumber}`).data();
-    assert.equal(data.roomType, spec.roomType);
-    assert.equal(data.normalRent, spec.normalRent);
-    assert.equal(data.status, 'EMPTY');
-    assert.equal(data.deleted, false);
+  assert.deepEqual(rooms.docs.map(doc => doc.data().roomNumber).sort((a,b)=>a-b), DEFAULT_ROOM_NUMBERS);
+  for (const room of rooms.docs) {
+    assert.equal(room.id, `room_${room.data().roomNumber}`);
+    assert.equal(room.data().schemaVersion, 3);
+    assert.equal(room.data().status, 'EMPTY');
+    assert.equal(room.data().normalRent, 0);
+    assert.equal(room.data().floorId, undefined);
   }
+
 });
 
 test('reinstall does not duplicate rooms or restart the trial', async () => {
@@ -53,7 +54,7 @@ test('reinstall does not duplicate rooms or restart the trial', async () => {
   assert.equal((await db.doc(`businesses/${uid}/settings/license`).get()).data().trialStart.toMillis(), now);
 });
 
-test('incomplete new account keeps an existing room and adds only missing defaults', async () => {
+test('incomplete new account preserves existing rooms without seeding defaults', async () => {
   const uid = `partial${Date.now()}`;
   const now = Date.parse('2026-10-23T08:00:00.000Z');
   await identity(uid, uid, {createdAt: Timestamp.fromMillis(now), newOwnerSetup: true, onboardingStatus: 'pending'});
@@ -72,13 +73,13 @@ test('incomplete new account keeps an existing room and adds only missing defaul
     deleted: true,
   });
   const result = await provisionHotel(db, uid, uid, now);
-  assert.equal(result.roomsAdded, 10);
+  assert.equal(result.roomsAdded, 0);
   const kept = (await db.doc(`businesses/${uid}/rooms/room_108`).get()).data();
   assert.equal(kept.normalRent, 9999);
   const keptDeleted = (await db.doc(`businesses/${uid}/rooms/room_101`).get()).data();
   assert.equal(keptDeleted.deleted, true);
   assert.equal(keptDeleted.status, 'BOOKED');
-  assert.equal((await db.collection(`businesses/${uid}/rooms`).get()).size, 12);
+  assert.equal((await db.collection(`businesses/${uid}/rooms`).get()).size, 2);
 });
 
 test('restored owner with missing license is not onboarded again', async () => {
@@ -96,4 +97,37 @@ test('restored owner with missing license is not onboarded again', async () => {
   assert.deepEqual((await db.collection(`businesses/${uid}/rooms`).get()).docs.map((doc) => doc.data()), before);
   assert.equal((await db.doc(`businesses/${uid}/guests/CUST-0001`).get()).data().idFrontStoragePath, 'kept/id_front.jpg');
   assert.equal((await db.doc(`businesses/${uid}/payments/pay_adv_room_102`).get()).data().deleted, true);
+});
+
+test('email owner initializes twelve rooms and foreign email is rejected', async () => {
+  const uid = `email${Date.now()}`, email = 'owner@example.test';
+  await identity(uid, '+919999999980', {onboardingStatus: 'pending', newOwnerSetup: true, createdAt: Timestamp.now()});
+  await db.doc(`users/${uid}`).set({email}, {merge: true});
+  await assert.rejects(provisionHotel(db, uid, 'other@example.test'), /Verified owner required/);
+  const result = await provisionHotel(db, uid, email);
+  assert.equal(result.provisioned, true);
+  assert.equal(result.roomsAdded, 12);
+  assert.equal((await db.collection(`businesses/${uid}/rooms`).get()).size, 12);
+  assert.equal((await provisionHotel(db, uid, email)).provisioned, false);
+});
+
+test('two devices onboarding concurrently seed a single shared template', async () => {
+  const uid=`concurrent${Date.now()}`;
+  await identity(uid,uid,{onboardingStatus:'pending',newOwnerSetup:true,createdAt:Timestamp.now()});
+  const results=await Promise.all([provisionHotel(db,uid,uid),provisionHotel(db,uid,uid)]);
+  assert.equal(results.filter(result=>result.provisioned).length,1);
+  assert.equal(results.reduce((sum,result)=>sum+result.roomsAdded,0),12);
+  assert.equal((await db.collection(`businesses/${uid}/rooms`).get()).size,12);
+});
+
+test('returning login preserves edited and deleted default rooms', async () => {
+  const uid=`edited${Date.now()}`;
+  await identity(uid,uid,{onboardingStatus:'pending',newOwnerSetup:true,createdAt:Timestamp.now()});
+  await provisionHotel(db,uid,uid);
+  await db.doc(`businesses/${uid}/rooms/room_101`).update({normalRent:2300,status:'BOOKED',guestName:'Saved guest'});
+  await db.doc(`businesses/${uid}/rooms/room_102`).update({deleted:true});
+  assert.equal((await provisionHotel(db,uid,uid)).roomsAdded,0);
+  const room=(await db.doc(`businesses/${uid}/rooms/room_101`).get()).data();
+  assert.equal(room.normalRent,2300);assert.equal(room.status,'BOOKED');
+  assert.equal((await db.doc(`businesses/${uid}/rooms/room_102`).get()).data().deleted,true);
 });

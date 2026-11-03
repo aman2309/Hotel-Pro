@@ -7,6 +7,9 @@ service firebase.storage {
 
     // Owner of businesses/{businessId}, or the signed-in user whose
     // users/{uid}.businessId is that same hotel. Default Firestore DB only.
+    function isAdmin() {
+      return signedIn() && request.auth.token.get('admin', false) == true;
+    }
     function isBusinessOwner(businessId) {
       return signedIn()
         && firestore.exists(/databases/(default)/documents/businesses/$(businessId))
@@ -15,9 +18,12 @@ service firebase.storage {
 
     function isLicensedOwner(businessId) {
       let license = /databases/(default)/documents/businesses/$(businessId)/settings/license;
-      return isBusinessOwner(businessId) && firestore.exists(license) &&
-        (firestore.get(license).data.activated == true ||
-         request.time < firestore.get(license).data.trialStart + duration.value(10, 'd'));
+      return isBusinessOwner(businessId) && firestore.get(/databases/(default)/documents/businesses/$(businessId)).data.get('enabled', true) == true && firestore.exists(license) && (
+        (firestore.get(license).data.expiresAt is timestamp && request.time < firestore.get(license).data.expiresAt) ||
+        (firestore.get(license).data.activated != true &&
+          firestore.get(license).data.trialStart is timestamp &&
+          request.time < firestore.get(license).data.trialStart + duration.value(10, 'd'))
+      );
     }
 
     function isJpegImage() {
@@ -33,7 +39,7 @@ service firebase.storage {
     }
 
     match /businesses/{businessId}/guests/{guestId}/{fileName} {
-      allow read: if isBusinessOwner(businessId);
+      allow read: if isAdmin() || isBusinessOwner(businessId);
       allow create, update: if isLicensedOwner(businessId)
         && isJpegImage()
         && sizeOk()
@@ -42,7 +48,7 @@ service firebase.storage {
     }
 
     match /businesses/{businessId}/guests/{guestId}/additional/{additionalGuestId}/{fileName} {
-      allow read: if isBusinessOwner(businessId);
+      allow read: if isAdmin() || isBusinessOwner(businessId);
       allow create, update: if isLicensedOwner(businessId)
         && isJpegImage()
         && sizeOk()
@@ -51,7 +57,7 @@ service firebase.storage {
     }
     // New uploads are immutable versions. Old canonical paths remain readable.
     match /businesses/{businessId}/guests/{guestId}/versions/{hash}/{fileName} {
-      allow read: if isBusinessOwner(businessId);
+      allow read: if isAdmin() || isBusinessOwner(businessId);
       allow create: if isLicensedOwner(businessId) && isJpegImage() && sizeOk()
         && isIdFile(fileName) && hash.matches('[a-f0-9]{64}');
       allow update: if isLicensedOwner(businessId) && isJpegImage() && sizeOk()
@@ -60,7 +66,7 @@ service firebase.storage {
       allow delete: if false;
     }
     match /businesses/{businessId}/guests/{guestId}/additional/{additionalGuestId}/versions/{hash}/{fileName} {
-      allow read: if isBusinessOwner(businessId);
+      allow read: if isAdmin() || isBusinessOwner(businessId);
       allow create: if isLicensedOwner(businessId) && isJpegImage() && sizeOk()
         && isIdFile(fileName) && hash.matches('[a-f0-9]{64}');
       allow update: if isLicensedOwner(businessId) && isJpegImage() && sizeOk()

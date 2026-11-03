@@ -71,7 +71,7 @@ async function activateLicense(db, uid, phone, pin, secret, now = Date.now()) {
   const userRef = db.doc(`users/${uid}`);
   return db.runTransaction(async (tx) => {
     const user = (await tx.get(userRef)).data();
-    if (!user || user.phoneNumber !== phone) throw Error('Verified owner required');
+    if (!user || (phone.includes('@') ? user.email !== phone : user.phoneNumber !== phone)) throw Error('Verified owner required');
     const id = user.businessId;
     if (typeof id !== 'string' || !id || id.includes('/')) throw Error('Invalid mapping');
     const bizRef = db.doc(`businesses/${id}`);

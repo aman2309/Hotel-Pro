@@ -1,3 +1,8 @@
+import '../widgets/custom_bottom_sheet.dart';
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
+import '../theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -12,13 +17,10 @@ Future<void> showBillPreviewDialog(
   BillRecord bill, {
   bool applyGst = false,
 }) async {
-  await showDialog(
+  await showCustomBottomSheet(
     context: context,
     builder: (BuildContext dialogContext) {
-      return BillPreviewDialog(
-        bill: bill,
-        applyGst: applyGst,
-      );
+      return BillPreviewDialog(bill: bill, applyGst: applyGst);
     },
   );
 }
@@ -76,9 +78,7 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
     }
 
     try {
-      return formatDateTime(
-        DateTime.parse(value.toString()),
-      );
+      return formatDateTime(DateTime.parse(value.toString()));
     } catch (error) {
       return "-";
     }
@@ -131,33 +131,7 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
     );
   }
 
-  String stayDuration() {
-    if (bill.bookingTime == null) {
-      return "-";
-    }
-
-    final Duration duration =
-        (bill.checkoutTime ?? DateTime.now()).difference(bill.bookingTime!);
-
-    final int totalMinutes = duration.inMinutes;
-    final int days = totalMinutes ~/ 1440;
-    final int hours = (totalMinutes % 1440) ~/ 60;
-    final int minutes = totalMinutes % 60;
-
-    final List<String> parts = [];
-
-    if (days > 0) {
-      parts.add("$days ${days == 1 ? "Day" : "Days"}");
-    }
-
-    if (hours > 0) {
-      parts.add("$hours ${hours == 1 ? "Hour" : "Hours"}");
-    }
-
-    parts.add("$minutes ${minutes == 1 ? "Minute" : "Minutes"}");
-
-    return parts.join(" ");
-  }
+  String stayDuration() => bill.stayDurationLabel();
 
   Future<void> printBill() async {
     final pw.Document document = pw.Document();
@@ -286,11 +260,7 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
               billLine("DISCOUNT", "Rs. ${bill.discount}"),
               if (showGst) ...[
                 billLine("TAXABLE AMOUNT", "Rs. ${subtotal()}", bold: true),
-                billLine(
-                  "GST (${gstRateLabel()}%)",
-                  "Rs. $gst",
-                  bold: true,
-                ),
+                billLine("GST (${gstRateLabel()}%)", "Rs. $gst", bold: true),
                 billLine("GRAND TOTAL", "Rs. $total", bold: true),
               ] else
                 billLine(
@@ -301,9 +271,7 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
               pw.SizedBox(height: 8),
               pw.Text(
                 "PAYMENT SUMMARY",
-                style: pw.TextStyle(
-                  fontWeight: pw.FontWeight.bold,
-                ),
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               ),
               pw.SizedBox(height: 5),
               billLine(
@@ -314,9 +282,7 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
                 pw.SizedBox(height: 8),
                 pw.Text(
                   "PART PAYMENT HISTORY",
-                  style: pw.TextStyle(
-                    fontWeight: pw.FontWeight.bold,
-                  ),
+                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                 ),
                 pw.SizedBox(height: 4),
                 ...bill.partPayments.map(
@@ -339,17 +305,9 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
                   bold: true,
                 )
               else
-                billLine(
-                  "BALANCE DUE",
-                  "Rs. $due",
-                  bold: true,
-                ),
+                billLine("BALANCE DUE", "Rs. $due", bold: true),
               pw.Divider(),
-              billLine(
-                "TOTAL RECEIVED",
-                "Rs. $received",
-                bold: true,
-              ),
+              billLine("TOTAL RECEIVED", "Rs. $received", bold: true),
               pw.SizedBox(height: 30),
               pw.Divider(),
               pw.Center(
@@ -405,50 +363,50 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return CustomDialog(
       titlePadding: EdgeInsets.zero,
       title: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(18),
-        decoration: const BoxDecoration(color: Color(0xFF800000)),
+        decoration: const BoxDecoration(color: AppColors.ink),
         child: Column(
           children: [
             Text(
               HotelSettingsStore.hotelName.toUpperCase(),
               style: const TextStyle(
-                color: Colors.white,
+                color: CustomColors.surface,
                 fontSize: 25,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 4),
             const Text(
-              "FINAL ROOM BILL",
-              style: TextStyle(color: Colors.white, fontSize: 15),
+              "Final room bill",
+              style: TextStyle(color: CustomColors.surface, fontSize: 15),
             ),
             const SizedBox(height: 7),
             Text(
               HotelSettingsStore.hotelAddress.toUpperCase(),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white, fontSize: 11),
+              style: const TextStyle(color: CustomColors.surface, fontSize: 11),
             ),
             const SizedBox(height: 3),
             Text(
               "Mobile: ${HotelSettingsStore.hotelMobile.isEmpty ? "-" : HotelSettingsStore.hotelMobile}",
-              style: const TextStyle(color: Colors.white, fontSize: 11),
+              style: const TextStyle(color: CustomColors.surface, fontSize: 11),
             ),
             const SizedBox(height: 3),
             Text(
               "Registration No.: ${HotelSettingsStore.registrationNumber.isEmpty ? "-" : HotelSettingsStore.registrationNumber}",
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white, fontSize: 11),
+              style: const TextStyle(color: CustomColors.surface, fontSize: 11),
             ),
             const SizedBox(height: 3),
             Text(
               "GST No.: ${HotelSettingsStore.gstNumber.isEmpty ? "-" : HotelSettingsStore.gstNumber}",
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: Colors.white,
+                color: CustomColors.surface,
                 fontSize: 11,
                 fontWeight: gstOnBill ? FontWeight.bold : FontWeight.normal,
               ),
@@ -472,10 +430,7 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
                 "Booking Date / Time",
                 formatDateTime(bill.bookingTime ?? bill.bookingDate),
               ),
-              detail(
-                "Checkout Date / Time",
-                formatDateTime(bill.checkoutTime),
-              ),
+              detail("Checkout Date / Time", formatDateTime(bill.checkoutTime)),
               detail("Stay Duration", stayDuration(), bold: true),
               const Divider(),
               detail("Room Rate", "₹${bill.roomRate} / Day"),
@@ -483,7 +438,7 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
               detail("Room Bill", "₹${bill.roomBill}"),
               const SizedBox(height: 10),
               const Text(
-                "EXTRA CHARGES",
+                "Extra charges",
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 5),
@@ -513,11 +468,8 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
                 ),
               const SizedBox(height: 8),
               const Text(
-                "PAYMENT SUMMARY",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                "Payment summary",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 5),
               detail(
@@ -527,11 +479,8 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
               if (bill.partPayments.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 const Text(
-                  "PART PAYMENT HISTORY",
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  "Part payment history",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 ...bill.partPayments.map(
@@ -554,17 +503,9 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
                   bold: true,
                 )
               else
-                detail(
-                  "BALANCE DUE",
-                  "₹${balanceDue()}",
-                  bold: true,
-                ),
+                detail("BALANCE DUE", "₹${balanceDue()}", bold: true),
               const Divider(),
-              detail(
-                "TOTAL RECEIVED",
-                "₹${amountReceived()}",
-                bold: true,
-              ),
+              detail("TOTAL RECEIVED", "₹${amountReceived()}", bold: true),
               const SizedBox(height: 15),
               const Center(
                 child: Text(
@@ -577,16 +518,16 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        CustomButton.text(
           onPressed: () {
             Navigator.pop(context);
           },
-          child: const Text("CLOSE"),
+          child: const Text("Close"),
         ),
-        ElevatedButton.icon(
+        CustomButton.icon(
           onPressed: printBill,
-          icon: const Icon(Icons.print),
-          label: const Text("PRINT"),
+          icon: const Icon(Icons.print_rounded),
+          label: const Text("Print"),
         ),
       ],
     );

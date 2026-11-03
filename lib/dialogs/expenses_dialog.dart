@@ -1,3 +1,9 @@
+import '../widgets/custom_bottom_sheet.dart';
+import '../widgets/custom_dropdown.dart';
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
+import '../widgets/custom_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
@@ -14,11 +20,9 @@ Future<void> showExpensesDialog(BuildContext context) async {
     return;
   }
 
-  final TextEditingController descriptionController =
-      TextEditingController();
+  final TextEditingController descriptionController = TextEditingController();
 
-  final TextEditingController amountController =
-      TextEditingController();
+  final TextEditingController amountController = TextEditingController();
 
   final FocusNode descriptionFocus = FocusNode();
   final FocusNode amountFocus = FocusNode();
@@ -41,14 +45,11 @@ Future<void> showExpensesDialog(BuildContext context) async {
     }
   }
 
-  await showDialog(
+  await showCustomBottomSheet(
     context: context,
     builder: (BuildContext dialogContext) {
       return StatefulBuilder(
-        builder: (
-          BuildContext context,
-          StateSetter updateDialog,
-        ) {
+        builder: (BuildContext context, StateSetter updateDialog) {
           int totalExpenses() {
             int total = 0;
 
@@ -60,18 +61,14 @@ Future<void> showExpensesDialog(BuildContext context) async {
           }
 
           Future<void> saveExpense() async {
-            final String description =
-                descriptionController.text.trim();
+            final String description = descriptionController.text.trim();
 
-            final int amount =
-                int.tryParse(amountController.text.trim()) ?? 0;
+            final int amount = int.tryParse(amountController.text.trim()) ?? 0;
 
             if (description.isEmpty || amount <= 0) {
               ScaffoldMessenger.of(dialogContext).showSnackBar(
                 const SnackBar(
-                  content: Text(
-                    "Please enter description and valid amount",
-                  ),
+                  content: Text("Please enter description and valid amount"),
                 ),
               );
 
@@ -101,9 +98,7 @@ Future<void> showExpensesDialog(BuildContext context) async {
             }
 
             ScaffoldMessenger.of(dialogContext).showSnackBar(
-              const SnackBar(
-                content: Text("EXPENSE SAVED SUCCESSFULLY"),
-              ),
+              const SnackBar(content: Text("Expense saved successfully")),
             );
           }
 
@@ -136,35 +131,35 @@ Future<void> showExpensesDialog(BuildContext context) async {
                       ),
                     ),
                     pw.SizedBox(height: 5),
-                  pw.Center(
-                    child: pw.Text(
-                      HotelSettingsStore.hotelAddress.toUpperCase(),
-                      textAlign: pw.TextAlign.center,
-                      style: const pw.TextStyle(fontSize: 9),
+                    pw.Center(
+                      child: pw.Text(
+                        HotelSettingsStore.hotelAddress.toUpperCase(),
+                        textAlign: pw.TextAlign.center,
+                        style: const pw.TextStyle(fontSize: 9),
+                      ),
                     ),
-                  ),
-                  pw.SizedBox(height: 2),
-                  pw.Center(
-                    child: pw.Text(
-                      "Mobile: ${HotelSettingsStore.hotelMobile.isEmpty ? "-" : HotelSettingsStore.hotelMobile}",
-                      style: const pw.TextStyle(fontSize: 9),
+                    pw.SizedBox(height: 2),
+                    pw.Center(
+                      child: pw.Text(
+                        "Mobile: ${HotelSettingsStore.hotelMobile.isEmpty ? "-" : HotelSettingsStore.hotelMobile}",
+                        style: const pw.TextStyle(fontSize: 9),
+                      ),
                     ),
-                  ),
-                  pw.SizedBox(height: 2),
-                  pw.Center(
-                    child: pw.Text(
-                      "Registration No.: ${HotelSettingsStore.registrationNumber.isEmpty ? "-" : HotelSettingsStore.registrationNumber}",
-                      style: const pw.TextStyle(fontSize: 9),
+                    pw.SizedBox(height: 2),
+                    pw.Center(
+                      child: pw.Text(
+                        "Registration No.: ${HotelSettingsStore.registrationNumber.isEmpty ? "-" : HotelSettingsStore.registrationNumber}",
+                        style: const pw.TextStyle(fontSize: 9),
+                      ),
                     ),
-                  ),
-                  pw.SizedBox(height: 2),
-                  pw.Center(
-                    child: pw.Text(
-                      "GST No.: ${HotelSettingsStore.gstNumber.isEmpty ? "-" : HotelSettingsStore.gstNumber}",
-                      style: const pw.TextStyle(fontSize: 9),
+                    pw.SizedBox(height: 2),
+                    pw.Center(
+                      child: pw.Text(
+                        "GST No.: ${HotelSettingsStore.gstNumber.isEmpty ? "-" : HotelSettingsStore.gstNumber}",
+                        style: const pw.TextStyle(fontSize: 9),
+                      ),
                     ),
-                  ),
-                  pw.SizedBox(height: 15),
+                    pw.SizedBox(height: 15),
                     pw.TableHelper.fromTextArray(
                       headers: const [
                         "DATE",
@@ -175,18 +170,14 @@ Future<void> showExpensesDialog(BuildContext context) async {
                       ],
                       data: ExpenseStore.expenses.reversed.map((expense) {
                         return [
-                          formatDateTime(
-                            expense["dateTime"].toString(),
-                          ),
+                          formatDateTime(expense["dateTime"].toString()),
                           expense["category"].toString(),
                           expense["description"].toString(),
                           expense["paymentMode"].toString(),
                           "Rs. ${expense["amount"]}",
                         ];
                       }).toList(),
-                      headerStyle: pw.TextStyle(
-                        fontWeight: pw.FontWeight.bold,
-                      ),
+                      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                       cellPadding: const pw.EdgeInsets.all(6),
                     ),
                     pw.SizedBox(height: 15),
@@ -212,13 +203,11 @@ Future<void> showExpensesDialog(BuildContext context) async {
             );
           }
 
-          return AlertDialog(
-            title: const Text("HOTEL EXPENSES"),
+          return CustomDialog(
+            title: const Text("Hotel expenses"),
             content: SizedBox(
-              width:
-                  MediaQuery.of(dialogContext).size.width * 0.85,
-              height:
-                  MediaQuery.of(dialogContext).size.height * 0.75,
+              width: MediaQuery.of(dialogContext).size.width * 0.85,
+              height: MediaQuery.of(dialogContext).size.height * 0.75,
               child: Column(
                 children: [
                   Wrap(
@@ -228,7 +217,7 @@ Future<void> showExpensesDialog(BuildContext context) async {
                     children: [
                       SizedBox(
                         width: 180,
-                        child: DropdownButtonFormField<String>(
+                        child: CustomDropdown<String>(
                           initialValue: category,
                           autofocus: true,
                           decoration: const InputDecoration(
@@ -286,7 +275,7 @@ Future<void> showExpensesDialog(BuildContext context) async {
                       ),
                       SizedBox(
                         width: 260,
-                        child: TextField(
+                        child: CustomTextField(
                           controller: descriptionController,
                           focusNode: descriptionFocus,
                           textInputAction: TextInputAction.next,
@@ -301,7 +290,7 @@ Future<void> showExpensesDialog(BuildContext context) async {
                       ),
                       SizedBox(
                         width: 160,
-                        child: TextField(
+                        child: CustomTextField(
                           controller: amountController,
                           focusNode: amountFocus,
                           keyboardType: TextInputType.number,
@@ -311,8 +300,7 @@ Future<void> showExpensesDialog(BuildContext context) async {
                           textInputAction: TextInputAction.next,
                           decoration: const InputDecoration(
                             labelText: "Amount",
-                            prefixIcon:
-                                Icon(Icons.currency_rupee),
+                            prefixIcon: Icon(Icons.currency_rupee_rounded),
                             border: OutlineInputBorder(),
                           ),
                           onSubmitted: (value) {
@@ -322,7 +310,7 @@ Future<void> showExpensesDialog(BuildContext context) async {
                       ),
                       SizedBox(
                         width: 180,
-                        child: DropdownButtonFormField<String>(
+                        child: CustomDropdown<String>(
                           initialValue: paymentMode,
                           focusNode: paymentFocus,
                           decoration: const InputDecoration(
@@ -334,10 +322,7 @@ Future<void> showExpensesDialog(BuildContext context) async {
                               value: "Cash",
                               child: Text("Cash"),
                             ),
-                            DropdownMenuItem(
-                              value: "UPI",
-                              child: Text("UPI"),
-                            ),
+                            DropdownMenuItem(value: "UPI", child: Text("UPI")),
                             DropdownMenuItem(
                               value: "Card",
                               child: Text("Card"),
@@ -358,16 +343,16 @@ Future<void> showExpensesDialog(BuildContext context) async {
                           },
                         ),
                       ),
-                      ElevatedButton.icon(
+                      CustomButton.icon(
                         focusNode: saveFocus,
                         onPressed: saveExpense,
-                        icon: const Icon(Icons.save),
-                        label: const Text("SAVE EXPENSE"),
+                        icon: const Icon(Icons.save_rounded),
+                        label: const Text("Save expense"),
                       ),
-                      OutlinedButton.icon(
+                      CustomButton.outlineIcon(
                         onPressed: printExpenseReport,
-                        icon: const Icon(Icons.print),
-                        label: const Text("PRINT EXPENSE REPORT"),
+                        icon: const Icon(Icons.print_rounded),
+                        label: const Text("Print expense report"),
                       ),
                     ],
                   ),
@@ -376,9 +361,7 @@ Future<void> showExpensesDialog(BuildContext context) async {
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      border: Border.all(
-                        color: Colors.red.shade300,
-                      ),
+                      border: Border.all(color: CustomColors.booked),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -392,25 +375,16 @@ Future<void> showExpensesDialog(BuildContext context) async {
                   const SizedBox(height: 12),
                   Expanded(
                     child: ExpenseStore.expenses.isEmpty
-                        ? const Center(
-                            child: Text("No Expenses Found"),
-                          )
+                        ? const Center(child: Text("No Expenses Found"))
                         : ListView.builder(
-                            itemCount:
-                                ExpenseStore.expenses.length,
-                            itemBuilder: (
-                              BuildContext context,
-                              int index,
-                            ) {
-                              final expense =
-                                  ExpenseStore.expenses.reversed
-                                      .toList()[index];
+                            itemCount: ExpenseStore.expenses.length,
+                            itemBuilder: (BuildContext context, int index) {
+                              final expense = ExpenseStore.expenses.reversed
+                                  .toList()[index];
 
                               return Card(
                                 child: ListTile(
-                                  leading: const Icon(
-                                    Icons.payments_outlined,
-                                  ),
+                                  leading: const Icon(Icons.payments_outlined),
                                   title: Text(
                                     expense["description"].toString(),
                                   ),
@@ -439,7 +413,7 @@ Future<void> showExpensesDialog(BuildContext context) async {
                                           updateDialog(() {});
                                         },
                                         icon: const Icon(
-                                          Icons.delete_outline,
+                                          Icons.delete_outline_rounded,
                                         ),
                                       ),
                                     ],
@@ -453,11 +427,11 @@ Future<void> showExpensesDialog(BuildContext context) async {
               ),
             ),
             actions: [
-              TextButton(
+              CustomButton.text(
                 onPressed: () {
                   Navigator.pop(dialogContext);
                 },
-                child: const Text("CLOSE"),
+                child: const Text("Close"),
               ),
             ],
           );

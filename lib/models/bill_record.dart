@@ -1,3 +1,5 @@
+import '../utils/stay_duration.dart' as stay;
+
 class BillRecord {
   String billNumber;
   String customerId;
@@ -53,6 +55,13 @@ class BillRecord {
     this.applyGst = false,
   });
 
+  String stayDurationLabel([DateTime? now]) =>
+      stay.stayDurationLabel(bookingTime, checkout: checkoutTime, now: now);
+
+  int? get finalStayMinutes => checkoutTime == null
+      ? null
+      : stay.stayDurationMinutes(bookingTime, checkout: checkoutTime);
+
   Map<String, dynamic> toJson() {
     return {
       "billNumber": billNumber,
@@ -64,6 +73,7 @@ class BillRecord {
       "bookingDate": bookingDate?.toIso8601String(),
       "bookingTime": bookingTime?.toIso8601String(),
       "checkoutTime": checkoutTime?.toIso8601String(),
+      if (finalStayMinutes != null) "stayDurationMinutes": finalStayMinutes,
       "roomRate": roomRate,
       "bookedDays": bookedDays,
       "roomBill": roomBill,
@@ -94,7 +104,8 @@ class BillRecord {
       bookingTime: json["bookingTime"] == null
           ? null
           : DateTime.parse(json["bookingTime"] as String),
-      checkoutTime: json["checkoutTime"] == null ||
+      checkoutTime:
+          json["checkoutTime"] == null ||
               json["checkoutTime"].toString().isEmpty
           ? null
           : DateTime.parse(json["checkoutTime"] as String),

@@ -1,6 +1,6 @@
-# Hotel Pro cPanel backend
+# Historical Hotel Pro cPanel backend
 
-This API serves the existing Hotel Pro Flutter app. The app does not connect to MySQL. Firebase project data is not deleted by these files.
+This backend is retired from the production Flutter app. The active backend is Firebase; see [the complete Firebase data model](../docs/firebase-data-model.md). These files are retained only for historical reference and a separately reviewed migration. They are not part of Firebase deployment.
 
 Deployment has not been run. This machine does not have the hotel's cPanel login, database password, or API domain.
 

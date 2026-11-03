@@ -57,7 +57,7 @@ void main() {
     expect(assessment.view, HotelLicenseView.activated);
     expect(assessment.message, contains('23 Oct 2027'));
     expect(assessment.message, contains('365 din'));
-    expect(assessment.message, contains('Renew with PIN'));
+    expect(assessment.message, contains('Renew with a license key'));
   });
 
   test('expired license asks for a PIN and keeps the record readable', () {
@@ -70,7 +70,7 @@ void main() {
       trialEndsAt: DateTime.utc(2026, 1, 11),
     );
     expect(assessment.view, HotelLicenseView.expired);
-    expect(assessment.message, contains('PIN'));
+    expect(assessment.message, contains('License key'));
   });
 
   test('29 February display uses the dated expiry', () {

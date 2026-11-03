@@ -4,7 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'hotel_data_buffer.dart';
+import 'firebase_owner_identity.dart';
 
 import '../models/hotel_cloud_account.dart';
 import 'hotel_sync_plan.dart';
@@ -331,6 +332,7 @@ class HotelFirestoreService {
   Future<HotelCloudAccount?> ensureOwnerBusiness(
     User user, {
     bool allowCreate = false,
+    String? contactPhone,
   }) async {
     if (!isAvailable) {
       _log('Firestore skipped: Firebase is not initialized on this platform.');
@@ -348,13 +350,14 @@ class HotelFirestoreService {
     lastError = null;
     try {
       if (allowCreate) {
-        await (await SharedPreferences.getInstance()).setBool(
+        await (await HotelDataBuffer.getInstance()).setBool(
           'hotel_new_owner_$uid',
           true,
         );
       }
       final HotelCloudAccount account = await _ensureOwnerBusinessLocked(
         user,
+        contactPhone: contactPhone,
       ).timeout(const Duration(seconds: 20));
       _account = account;
       await _cacheAccount(account);
@@ -366,7 +369,7 @@ class HotelFirestoreService {
     } on TimeoutException catch (error, stack) {
       lastError = 'Cloud backup timed out. Local hotel data is unchanged.';
       _logError('ensureOwnerBusiness timed out: $error', stack);
-      return _accountFromLocalCache(uid);
+      return null;
     } on FirebaseException catch (error, stack) {
       lastError = _humanizeFirebase(error);
       _logError(
@@ -374,26 +377,30 @@ class HotelFirestoreService {
         'message=${error.message}',
         stack,
       );
-      return _accountFromLocalCache(uid);
+      return null;
     } catch (error, stack) {
       lastError = error.toString();
       _logError('ensureOwnerBusiness failed: $error', stack);
-      return _accountFromLocalCache(uid);
+      return null;
     }
   }
 
-  Future<HotelCloudAccount> _ensureOwnerBusinessLocked(User user) async {
+  Future<HotelCloudAccount> _ensureOwnerBusinessLocked(
+    User user, {
+    String? contactPhone,
+  }) async {
     final String uid = user.uid;
-    final String phoneNumber = user.phoneNumber ?? '';
+    final verifiedPhone = (user.phoneNumber ?? '').trim();
+    final String phoneNumber = verifiedPhone.isEmpty
+        ? (contactPhone ?? '').trim()
+        : verifiedPhone;
     final String businessName = _safeBusinessName();
     final String? knownBusinessId = await _resolveExistingBusinessId(
       uid,
-      phoneNumber: phoneNumber,
+      phoneNumber: verifiedPhone,
     );
     final canCreate =
-        (await SharedPreferences.getInstance()).getBool(
-          'hotel_new_owner_$uid',
-        ) ==
+        (await HotelDataBuffer.getInstance()).getBool('hotel_new_owner_$uid') ==
         true;
     final DocumentReference<Map<String, dynamic>> userRef = userDoc(uid);
 
@@ -403,16 +410,18 @@ class HotelFirestoreService {
       final DocumentSnapshot<Map<String, dynamic>> userSnap = await transaction
           .get(userRef);
 
-      final digits = phoneNumber.replaceAll(RegExp(r'\D'), '');
-      final phoneRef = _db
-          .collection(HotelFirestorePaths.phoneIndex)
-          .doc(digits);
-      final phoneSnap = await transaction.get(phoneRef);
+      final digits = verifiedPhoneIndexKey(verifiedPhone);
+      final phoneRef = digits == null
+          ? null
+          : _db.collection(HotelFirestorePaths.phoneIndex).doc(digits);
+      final phoneSnap = phoneRef == null
+          ? null
+          : await transaction.get(phoneRef);
       String? existingBusinessId = resolveHotelMapping(
         uid: uid,
         userBusinessId: _readBusinessId(userSnap.data()) ?? knownBusinessId,
-        phoneBusinessId: _readBusinessId(phoneSnap.data()),
-        phoneOwnerUid: phoneSnap.data()?['ownerUid'] as String?,
+        phoneBusinessId: _readBusinessId(phoneSnap?.data()),
+        phoneOwnerUid: phoneSnap?.data()?['ownerUid'] as String?,
       );
       if (existingBusinessId == null || existingBusinessId.isEmpty) {
         if (userSnap.exists) {
@@ -424,11 +433,13 @@ class HotelFirestoreService {
           existingBusinessId != null && existingBusinessId.isNotEmpty;
       final bool firstHotel = firstHotelForSignedInNumber(
         userDocumentExists: userSnap.exists,
-        phoneIndexExists: phoneSnap.exists,
+        phoneIndexExists: phoneSnap?.exists ?? false,
       );
-      if (!reusedExistingBusiness && !canCreate && !firstHotel) {
+      if (!reusedExistingBusiness &&
+          !canCreate &&
+          (HotelDataBuffer.cloudOnly || !firstHotel)) {
         throw StateError(
-          'Returning owner has no verified hotel mapping. Legacy mapping review required; no new hotel was created.',
+          'No hotel account found. Choose Sign up to create your hotel.',
         );
       }
       final String businessId = reusedExistingBusiness
@@ -451,8 +462,14 @@ class HotelFirestoreService {
           'Existing hotel belongs to another owner. Mapping was not changed.',
         );
       }
+      final resolvedPhone = phoneNumber.isNotEmpty
+          ? phoneNumber
+          : (userSnap.data()?['phoneNumber'] ??
+                    bizSnap.data()?['phoneNumber'] ??
+                    '')
+                .toString();
       final FieldValue now = FieldValue.serverTimestamp();
-      if (!phoneSnap.exists) {
+      if (phoneRef != null && phoneSnap?.exists != true) {
         transaction.set(phoneRef, {
           'ownerUid': uid,
           'businessId': businessId,
@@ -460,9 +477,13 @@ class HotelFirestoreService {
         });
       }
       final Map<String, dynamic> userPayload = <String, dynamic>{
-        'phoneNumber': phoneNumber,
+        'phoneNumber': phoneNumber.isEmpty
+            ? (userSnap.data()?['phoneNumber'] ?? '')
+            : phoneNumber,
+        if (user.email != null) 'email': user.email,
         'businessId': businessId,
         'role': ownerRole,
+        'ownerName': user.displayName ?? '',
         'updatedAt': now,
       };
       if (!userSnap.exists) {
@@ -501,7 +522,7 @@ class HotelFirestoreService {
       return _TransactionResult(
         account: HotelCloudAccount(
           ownerUid: uid,
-          phoneNumber: phoneNumber,
+          phoneNumber: resolvedPhone,
           businessId: businessId,
           businessName: resolvedName,
           role: ownerRole,
@@ -526,7 +547,7 @@ class HotelFirestoreService {
     }
 
     await _writePhoneIndex(
-      phoneNumber: phoneNumber,
+      phoneNumber: verifiedPhone,
       businessId: result.account.businessId,
       ownerUid: uid,
     );
@@ -579,7 +600,7 @@ class HotelFirestoreService {
         phoneOwnerUid: phone?['ownerUid'] as String?,
       );
     }
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     if (prefs.getString(_prefOwnerUid) == uid &&
         (prefs.getString(_prefBusinessId) ?? '').isNotEmpty) {
       return prefs.getString(_prefBusinessId);
@@ -645,7 +666,7 @@ class HotelFirestoreService {
   }
 
   Future<void> _cacheAccount(HotelCloudAccount account) async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
     // Preserve pre-upgrade local ownership before replacing the account cache.
     if (prefs.getString('hotel_local_owner_uid') == null &&
         (prefs.getString(_prefOwnerUid) ?? '').isNotEmpty) {
@@ -662,31 +683,6 @@ class HotelFirestoreService {
     }
     await prefs.setString(_prefOwnerUid, account.ownerUid);
     await prefs.setString(_prefBusinessId, account.businessId);
-  }
-
-  Future<HotelCloudAccount?> _accountFromLocalCache(String uid) async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    final String cachedUid = (prefs.getString(_prefOwnerUid) ?? '').trim();
-    final String cachedBusinessId = (prefs.getString(_prefBusinessId) ?? '')
-        .trim();
-    if (cachedUid != uid || cachedBusinessId.isEmpty) {
-      _log(
-        'No matching local businessId cache for uid=$uid. '
-        'Local hotel records were not changed.',
-      );
-      return _account;
-    }
-    _account = HotelCloudAccount(
-      ownerUid: cachedUid,
-      phoneNumber: FirebaseAuth.instance.currentUser?.phoneNumber ?? '',
-      businessId: cachedBusinessId,
-      businessName: _safeBusinessName(),
-    );
-    _log(
-      'Using cached businessId=$cachedBusinessId after Firestore error. '
-      'Local hotel data remains the fallback.',
-    );
-    return _account;
   }
 
   String _humanizeFirebase(FirebaseException error) {

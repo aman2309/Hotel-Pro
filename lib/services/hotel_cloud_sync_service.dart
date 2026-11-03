@@ -3,7 +3,8 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'hotel_data_buffer.dart';
+import 'retryable_task.dart';
 
 import '../models/bill_record.dart';
 import '../models/customer.dart';
@@ -14,37 +15,32 @@ import '../stores/expense_store.dart';
 import '../stores/hotel_settings_store.dart';
 import 'cloud_sync_service.dart';
 import 'hotel_cloud_codec.dart';
-import 'hotel_cloud_policy.dart';
 import 'hotel_firestore_service.dart';
 import 'hotel_photo_storage_service.dart';
 import 'hotel_sync_plan.dart';
 import 'phone_auth_service.dart';
-import '../config/backend_config.dart';
-import 'cpanel_sync_service.dart';
 import 'license_service.dart';
 
 enum HotelCloudStatus { synced, syncing, offline, error, restoring, migrating }
 
-/// Shared Firestore data with a durable owner-scoped compare-and-set journal.
-/// Local edits remain provisional until a server transaction acknowledges them.
+/// Firebase-only business records with owner-scoped, atomic server writes.
+/// The memory buffer is UI state, never an offline persistence backend.
 class HotelCloudSyncService extends ChangeNotifier {
   HotelCloudSyncService._();
   static final HotelCloudSyncService instance = HotelCloudSyncService._();
   static const _logTag = 'HotelCloudSync';
   static const _prefDeviceId = 'hotel_firestore_device_id';
   static const _timeout = Duration(seconds: 25);
-  final HotelCloudPolicy policy = const HotelCloudPolicy();
   HotelCloudStatus status = HotelCloudStatus.offline;
   String? lastError;
   bool allowPush = false;
   bool applyingRemote = false;
   bool restoredThisSession = false;
   bool _bootstrapped = false;
-  Future<void>? _bootstrapFuture;
+  final _bootstrapTask = RetryableTask<void>();
   Future<void>? _flushFuture;
   Future<void>? _captureFuture;
   Future<void>? _pullFuture;
-  Timer? _retryTimer;
   final _subscriptions =
       <StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>[];
   Future<void> _journalTail = Future<void>.value();
@@ -63,6 +59,14 @@ class HotelCloudSyncService extends ChangeNotifier {
   }
 
   int _actionDepth = 0;
+  bool _checkpointing = false;
+  bool get hasActiveEdit =>
+      _actionDepth > 0 ||
+      _captureFuture != null ||
+      _flushFuture != null ||
+      _checkpointing;
+  Map<String, Object>? _actionCheckpoint;
+  Map<String, Object>? _confirmedBuffer;
   int remoteRevision = 0;
   DateTime? lastSyncAt;
   bool get bootstrapped => _bootstrapped;
@@ -77,7 +81,7 @@ class HotelCloudSyncService extends ChangeNotifier {
       (await _readState())['desired'] != null;
 
   Future<Map<String, dynamic>> _readState() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final raw = prefs.getString(_stateKey);
     return raw == null
         ? <String, dynamic>{}
@@ -85,7 +89,7 @@ class HotelCloudSyncService extends ChangeNotifier {
   }
 
   Future<void> _writeState(Map<String, dynamic> state) async {
-    await (await SharedPreferences.getInstance()).setString(
+    await (await HotelDataBuffer.getInstance()).setString(
       _stateKey,
       jsonEncode(state),
     );
@@ -144,75 +148,33 @@ class HotelCloudSyncService extends ChangeNotifier {
     return result;
   }
 
-  /// Copies, never removes, all local records and photo bytes before applying
-  /// remote data. Archives are exportable from the sync status dialog.
-  Future<String> archiveLocal(String reason) async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = <String, dynamic>{};
-    for (final key in prefs.getKeys()) {
-      if (key.startsWith('hotelpro1_') ||
-          key.startsWith('hotel_') ||
-          key.startsWith('hp1_') ||
-          key.startsWith('cloud_sync_')) {
-        if (!key.startsWith('hotel_archive_')) data[key] = prefs.get(key);
-      }
-    }
-    final key =
-        'hotel_archive_${DateTime.now().microsecondsSinceEpoch}_$reason';
-    await prefs.setString(
-      key,
-      jsonEncode({
-        'reason': reason,
-        'ownerUid': PhoneAuthSession.uid,
-        'businessId': HotelFirestoreService.instance.businessId,
-        'data': data,
-      }),
-    );
-    return key;
-  }
-
-  /// Existing verified owners may reopen offline. A new install or another
-  /// owner cannot use this fallback before a successful server restore.
-  Future<bool> resumeOfflineIfVerifiedCache() async {
-    if (!isReady) return false;
-    final prefs = await SharedPreferences.getInstance();
-    final businessId = HotelFirestoreService.instance.businessId!;
-    if (prefs.getString('hotel_local_owner_uid') != PhoneAuthSession.uid ||
-        prefs.getString('hotel_local_business_id') != businessId ||
-        prefs.getString('hp1_license_owner_uid') != PhoneAuthSession.uid ||
-        (await _readState())['baseline'] == null) {
-      return false;
-    }
-    _bootstrapped = true;
-    allowPush = true;
-    status = HotelCloudStatus.offline;
-    lastError =
-        'Offline: saved hotel loaded. Changes remain pending until server confirmation.';
-    _startListeners(businessId);
-    _retryTimer?.cancel();
-    _retryTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      unawaited(retry());
-    });
-    notifyListeners();
-    return true;
-  }
+  /// Compatibility hook for photo conflict handling; business archives are not
+  /// persisted on the device. Confirmed state is always read from Firestore.
+  Future<String> archiveLocal(String reason) async => 'session-only';
 
   Future<void> bootstrap() {
-    if (hotelUsesCpanel) return CpanelSyncService.instance.bootstrap();
-    return _bootstrapFuture ??= _bootstrap();
+    return _bootstrapTask.run(_bootstrap);
   }
+
   Future<void> retry() async {
-    _bootstrapFuture = null;
+    _bootstrapTask.reset();
     if (!_bootstrapped) {
       await bootstrap();
     } else {
       await flushOutbox();
       await pullFromCloud();
+      final photos = HotelPhotoStorageService.instance;
+      await photos.syncPending(reason: 'refresh');
+      if (photos.hasPendingUploadFailure) {
+        lastError =
+            'Photo upload is pending. Check internet and refresh again.';
+        status = HotelCloudStatus.error;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> retainDataForNextLogin() async {
-    _retryTimer?.cancel();
     await HotelPhotoStorageService.instance.stopForSignOut();
     for (final subscription in _subscriptions) {
       await subscription.cancel();
@@ -223,254 +185,95 @@ class HotelCloudSyncService extends ChangeNotifier {
     await _flushFuture;
     await _pullFuture;
     _bootstrapped = false;
-    _bootstrapFuture = null;
+    _bootstrapTask.reset();
+    _confirmedBuffer = null;
+    _actionCheckpoint = null;
     allowPush = false;
     restoredThisSession = false;
     notifyListeners();
   }
 
-  Future<void> _bootstrap() async {
+  Future<void> _bootstrapServerOnly() async {
     allowPush = false;
+    status = HotelCloudStatus.restoring;
+    notifyListeners();
     try {
-      if (!isReady) {
-        throw StateError(
-          'Hotel identity could not be verified. Retry when online.',
-        );
-      }
-      status = HotelCloudStatus.restoring;
-      notifyListeners();
-      final prefs = await SharedPreferences.getInstance();
-      final businessId = HotelFirestoreService.instance.businessId!;
-      final previousOwner = prefs.getString('hotel_local_owner_uid');
-      final previousBusiness = prefs.getString('hotel_local_business_id');
-      final bool quarantine = policy.quarantineUnownedLocal(
-        hasLocalHotelData: _inventoryHasHotelData(await _localInventory()),
-        localOwnerUid: previousOwner,
-        localBusinessId: previousBusiness,
-        sessionUid: PhoneAuthSession.uid ?? '',
-        sessionBusinessId: businessId,
-      );
-      final ownerSwitched = quarantine;
-      if (quarantine) {
-        await archiveLocal('unowned-or-owner-switch');
-        await HotelPhotoStorageService.instance.retainOnlyBusiness(businessId);
-        // Preserved archive cannot be uploaded as another owner's hotel.
-        for (final key in [
-          CloudSyncService.roomKey,
-          CloudSyncService.billKey,
-          CloudSyncService.customerKey,
-          CloudSyncService.expenseKey,
-        ]) {
-          await prefs.setString(key, '[]');
-        }
-        for (final key
-            in prefs
-                .getKeys()
-                .where(
-                  (k) =>
-                      k.startsWith('hotel_') &&
-                      !k.startsWith('hotel_archive_') &&
-                      !k.startsWith('hotel_sync_v3_') &&
-                      !k.startsWith('hotel_photo_mismatch'),
-                )
-                .toList()) {
-          if (key.startsWith('hotel_firestore_') ||
-              key.startsWith('hotel_local_') ||
-              key.startsWith('hotel_storage_')) {
-            continue;
-          }
-          await prefs.remove(key);
-        }
-      }
-      await prefs.setString('hotel_local_owner_uid', PhoneAuthSession.uid!);
-      await prefs.setString('hotel_local_business_id', businessId);
-      final cloud = await HotelFirestoreService.instance
-          .fetchBusinessData(businessId)
-          .timeout(_timeout);
-      if (cloud['settings']?['sync']?['migrationInProgress'] == true &&
-          cloud['settings']?['sync']?['migrationDeviceId'] !=
-              await _deviceId()) {
-        throw StateError(
-          'Hotel migration is still running on another device. Retry shortly.',
-        );
-      }
-      final remote = _flatten(cloud);
-      final aliasState = await _readState();
-      final aliases = _strings(aliasState['paymentAliases']);
-      final candidate = await _snapshot();
-      for (final entry in candidate.entries.where(
-        (entry) => entry.key.startsWith('payments/'),
-      )) {
-        if (remote.containsKey(entry.key)) continue;
-        final matches = remote.entries
-            .where(
-              (other) =>
-                  other.key.startsWith('payments/') &&
-                  other.value['deleted'] != true &&
-                  other.value['kind'] == entry.value['kind'] &&
-                  other.value['dateTime'] != null &&
-                  other.value['dateTime'] == entry.value['dateTime'] &&
-                  other.value['amount'] == entry.value['amount'] &&
-                  other.value['paymentMode'] == entry.value['paymentMode'],
-            )
-            .toList();
-        if (matches.length == 1) aliases[entry.key] = matches.single.key;
-        if (matches.length > 1) {
-          await archiveLocal('legacy-payment-duplicates');
-          throw HotelSyncConflict(matches.map((entry) => entry.key).toList());
-        }
-      }
-      aliasState['paymentAliases'] = aliases;
-      await _writeState(aliasState);
-      final hasCloud =
-          remote.values.any((doc) => doc['deleted'] != true) ||
-          cloud['settings']?['sync']?['migrationCompleted'] == true;
-      var state = await _readState();
-      if (state['conflicts'] != null) {
-        throw HotelSyncConflict(List<String>.from(state['conflicts'] as List));
-      }
-      if (state['baseline'] == null) {
-        // Old local edits are never silently discarded by a returning login.
-        // A reviewed merge is required if legacy records differ from cloud.
-        if (hasCloud &&
-            (_inventoryHasHotelData(await _localInventory()) ||
-                cloud['settings']?['sync']?['migrationInProgress'] == true)) {
-          final local = await _snapshot();
-          final conflicts = local.entries
-              .where(
-                (entry) =>
-                    remote.containsKey(entry.key) &&
-                    hotelRecordFingerprint(remote[entry.key]) !=
-                        hotelRecordFingerprint(entry.value),
-              )
-              .map((entry) => entry.key)
-              .toList();
-          if (conflicts.isNotEmpty) {
-            await archiveLocal('legacy-conflict');
-            state['conflicts'] = conflicts;
-            await _writeState(state);
-            throw HotelSyncConflict(conflicts);
-          }
-          final additions = local.entries
-              .where((entry) => !remote.containsKey(entry.key))
-              .map(
-                (entry) => HotelSyncChange(entry.key, 'missing', entry.value),
-              )
-              .toList();
-          // Atomic migration has duplicate checks and no overwrite permission.
-          if (additions.isNotEmpty ||
-              cloud['settings']?['sync']?['migrationInProgress'] == true) {
-            await HotelFirestoreService.instance.commitMigration(
-              businessId,
-              additions,
-              await _deviceId(),
-            );
-          }
-        } else if (!hasCloud && !quarantine) {
-          final freshSetup =
-              cloud['settings']?['license']?['setupVersion'] == 1;
-          if (freshSetup) {
-            if (_inventoryHasHotelData(await _localInventory())) {
-              await archiveLocal('fresh-setup-legacy-data');
-              throw StateError(
-                'Saved hotel records require review before starting an empty hotel.',
-              );
-            }
-            // A verified fresh/reset hotel must never resurrect the PHP store.
-            await prefs.setString(CloudSyncService.roomKey, '[]');
-          } else {
-            // Unreviewed PHP data is not an automatic migration.
-            try {
-              await CloudSyncService.importLegacyForVerifiedOwner();
-            } on StateError catch (error) {
-              if (!error.toString().contains('approved owner mapping')) {
-                rethrow;
-              }
-              debugPrint('[CLOUD] unreviewed PHP import skipped');
-            }
-          }
-          final local = await _snapshot();
-          if (local.isNotEmpty) {
-            await archiveLocal('before-migration');
-            status = HotelCloudStatus.migrating;
-            notifyListeners();
-            await HotelFirestoreService.instance.commitMigration(
-              businessId,
-              local.entries
-                  .map(
-                    (entry) =>
-                        HotelSyncChange(entry.key, 'missing', entry.value),
-                  )
-                  .toList(),
-              await _deviceId(),
-            );
-          }
-        }
-      }
-      state = await _readState();
-      if (!ownerSwitched &&
-          state['baseline'] != null &&
-          state['desired'] == null) {
-        final local = await _snapshot();
-        final changes = planHotelChanges(
-          local: local,
-          baseline: _strings(state['baseline']),
-          remoteBaseline: _strings(state['remoteBaseline']),
-        );
-        if (changes.isNotEmpty) {
-          state['desired'] = local;
-          state['generation'] =
-              ((state['generation'] as num?)?.toInt() ?? 0) + 1;
-          await _writeState(state);
-        }
-      }
-      if (state['desired'] != null) {
-        allowPush = true;
-        await flushOutbox();
-        if (await hasPendingChanges) {
-          throw StateError(lastError ?? 'Pending offline edits need review.');
-        }
-      }
-      if (!await restoreFromCloud()) {
-        // A genuinely empty new hotel gets a baseline but no default room upload.
-        final latest = await HotelFirestoreService.instance.fetchBusinessData(
-          businessId,
-        );
-        if (_flatten(latest).values.any((doc) => doc['deleted'] != true)) {
-          throw StateError(
-            'Cloud restore incomplete. Retry before changing hotel data.',
-          );
-        }
-        state['baseline'] = _fingerprints(await _snapshot());
-        state['remoteBaseline'] = _fingerprints(_flatten(latest));
-        await _writeState(state);
-      }
+      if (!isReady) throw StateError('Sign in again to load your hotel.');
+      // Always start from Firestore. Never import device/PHP records.
+      await _writeState({});
+      await restoreFromCloud();
       allowPush = true;
       restoredThisSession = true;
       _bootstrapped = true;
       status = HotelCloudStatus.synced;
       lastError = null;
-      _startListeners(businessId);
-      _retryTimer?.cancel();
-      _retryTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-        unawaited(retry());
-      });
+      _startListeners(HotelFirestoreService.instance.businessId!);
       HotelPhotoStorageService.instance.startRetryTimer();
-      unawaited(
-        HotelPhotoStorageService.instance.syncPending(reason: 'bootstrap'),
-      );
     } catch (error) {
-      allowPush = false;
       _bootstrapped = false;
       lastError = error.toString();
-      status = error is FirebaseException
-          ? _statusForFirebase(error)
-          : HotelCloudStatus.error;
+      status = HotelCloudStatus.error;
       rethrow;
     } finally {
       notifyListeners();
     }
   }
+
+  /// Reject failed edits instead of keeping an offline business-data outbox.
+  Future<void> _requireConfirmedSave() async {
+    await flushOutbox();
+    if (!await hasPendingChanges) {
+      _confirmedBuffer = HotelDataBuffer.checkpoint();
+      // A save also waits for Storage uploads. Photo failures stay visible.
+      final photos = HotelPhotoStorageService.instance;
+      await photos.syncPending(reason: 'confirmed-save');
+      if (photos.hasPendingUploadFailure) {
+        lastError =
+            'Hotel records are saved in Firebase. Photo upload is pending; keep the app open and refresh to retry.';
+        status = HotelCloudStatus.error;
+        notifyListeners();
+      }
+      return;
+    }
+    final message =
+        lastError ?? 'Could not save to Firebase. Check internet and retry.';
+    final state = await _readState();
+    final failure = state['conflicts'] != null
+        ? 'Another device changed this record. Please refresh and try again.'
+        : message;
+    final confirmed = _confirmedBuffer ?? _actionCheckpoint;
+    if (confirmed != null) HotelDataBuffer.restoreCheckpoint(confirmed);
+    final cleanState = await _readState();
+    cleanState.remove('desired');
+    cleanState.remove('conflicts');
+    cleanState.remove('explicitDeletes');
+    cleanState.remove('photoVersion');
+    await _writeState(cleanState);
+    await HotelSettingsStore.loadSettings();
+    await CustomerStore.loadCustomers();
+    await BillStore.loadBills();
+    await ExpenseStore.loadExpenses();
+    try {
+      await restoreFromCloud();
+    } catch (_) {}
+    throw StateError(failure);
+  }
+
+  Future<void> cancelLocalAction() async {
+    if (!HotelDataBuffer.cloudOnly) return;
+    _actionDepth = 0;
+    final checkpoint = _confirmedBuffer ?? _actionCheckpoint;
+    _actionCheckpoint = null;
+    if (checkpoint != null) HotelDataBuffer.restoreCheckpoint(checkpoint);
+    await HotelSettingsStore.loadSettings();
+    await CustomerStore.loadCustomers();
+    await BillStore.loadBills();
+    await ExpenseStore.loadExpenses();
+    remoteRevision++;
+    notifyListeners();
+  }
+
+  Future<void> _bootstrap() => _bootstrapServerOnly();
 
   void _startListeners(String businessId) {
     for (final collection in HotelFirestorePaths.businessCollections) {
@@ -496,10 +299,6 @@ class HotelCloudSyncService extends ChangeNotifier {
   }
 
   Future<void> registerExpenseDeletion(String expenseId) async {
-    if (hotelUsesCpanel) {
-      await CpanelSyncService.instance.captureAndPush();
-      return;
-    }
     if (!_bootstrapped || !isReady) return;
     await archiveLocal('before-expense-removal');
     await _journal(() async {
@@ -513,9 +312,17 @@ class HotelCloudSyncService extends ChangeNotifier {
   }
 
   Future<void> beginLocalAction() async {
-    if (hotelUsesCpanel) return;
     // Reserve before yielding so a new listener pull cannot start between
     // waiting for an old pull and opening a room dialog.
+    if (HotelDataBuffer.cloudOnly && _actionDepth == 0) {
+      if (!_bootstrapped || !isReady) {
+        throw StateError('Hotel is not connected to Firebase.');
+      }
+      await HotelFirestoreService.instance
+          .businessDoc(HotelFirestoreService.instance.businessId!)
+          .get(const GetOptions(source: Source.server));
+      _actionCheckpoint = HotelDataBuffer.checkpoint();
+    }
     _actionDepth++;
     try {
       await _pullFuture;
@@ -530,24 +337,59 @@ class HotelCloudSyncService extends ChangeNotifier {
     }
   }
 
-  Future<void> endLocalAction() async {
-    if (hotelUsesCpanel) {
-      await CpanelSyncService.instance.captureAndPush();
-      return;
+  Future<void> commitActionCheckpoint({bool requirePhotos = false}) async {
+    if (_actionDepth != 1 || _checkpointing) {
+      throw StateError(
+        'Finish the current hotel action before saving this booking.',
+      );
     }
+    _checkpointing = true;
+    _actionDepth = 0;
+    try {
+      await notifyLocalChanged();
+      await _requireConfirmedSave();
+      if (requirePhotos) {
+        final photos = HotelPhotoStorageService.instance;
+        // syncPending is normally suppressed while this checkpoint is reserved.
+        await photos.flushQueue(reason: 'booking-checkpoint');
+        if (photos.hasPendingUploadFailure) {
+          throw StateError(
+            'ID photos could not finish uploading. ${photos.lastUploadError ?? 'Check your connection.'} Keep this form open and retry.',
+          );
+        }
+      }
+      _actionCheckpoint = HotelDataBuffer.checkpoint();
+      _confirmedBuffer = HotelDataBuffer.checkpoint();
+      lastError = null;
+      status = HotelCloudStatus.synced;
+      notifyListeners();
+    } finally {
+      _actionDepth = 1;
+      _checkpointing = false;
+    }
+  }
+
+  Future<void> endLocalAction() async {
     _actionDepth--;
     if (_actionDepth == 0) {
-      await notifyLocalChanged();
-      await flushOutbox();
-      await pullFromCloud();
+      try {
+        await notifyLocalChanged();
+        if (HotelDataBuffer.cloudOnly) {
+          await _requireConfirmedSave();
+        } else {
+          await flushOutbox();
+        }
+        await pullFromCloud();
+        _actionCheckpoint = null;
+      } catch (_) {
+        if (HotelDataBuffer.cloudOnly) await cancelLocalAction();
+        rethrow;
+      }
     }
   }
 
   Future<void> notifyLocalChanged() {
-    if (hotelUsesCpanel) {
-      return CpanelSyncService.instance.captureAndPush();
-    }
-    if (!LicenseService.instance.canEditHotel ||
+    if ((!HotelDataBuffer.cloudOnly && !LicenseService.instance.canEditHotel) ||
         applyingRemote ||
         !_bootstrapped ||
         !allowPush ||
@@ -559,6 +401,7 @@ class HotelCloudSyncService extends ChangeNotifier {
     next = () async {
       await previous;
       await _journal(() async {
+        await HotelPhotoStorageService.instance.capturePendingPhotos();
         final state = await _readState();
         final local = await _snapshot();
         final changes = planHotelChanges(
@@ -573,10 +416,13 @@ class HotelCloudSyncService extends ChangeNotifier {
       });
     }();
     _captureFuture = next;
-    return next.whenComplete(() {
+    final captured = next.whenComplete(() {
       if (identical(_captureFuture, next)) _captureFuture = null;
-      unawaited(flushOutbox());
+      if (!HotelDataBuffer.cloudOnly) unawaited(flushOutbox());
     });
+    return HotelDataBuffer.cloudOnly
+        ? captured.then((_) => _requireConfirmedSave())
+        : captured;
   }
 
   Future<void> flushOutbox() async {
@@ -688,6 +534,7 @@ class HotelCloudSyncService extends ChangeNotifier {
         !_bootstrapped ||
         !isReady ||
         applyingRemote ||
+        _checkpointing ||
         _actionDepth > 0 ||
         _captureFuture != null ||
         _flushFuture != null) {
@@ -728,7 +575,10 @@ class HotelCloudSyncService extends ChangeNotifier {
     final String businessId = HotelFirestoreService.instance.businessId!;
     debugPrint('[CLOUD_RESTORE] businessId=$businessId');
 
-    if (_actionDepth > 0 || await hasPendingChanges || _captureFuture != null) {
+    if (_actionDepth > 0 ||
+        _checkpointing ||
+        await hasPendingChanges ||
+        _captureFuture != null) {
       return false;
     }
     applyingRemote = true;
@@ -745,7 +595,7 @@ class HotelCloudSyncService extends ChangeNotifier {
       }
       final stateBefore = await _readState();
       final remoteFingerprints = _fingerprints(_flatten(cloud));
-      final prefsBefore = await SharedPreferences.getInstance();
+      final prefsBefore = await HotelDataBuffer.getInstance();
       final photoVersion = (cloud['guests'] ?? {}).values
           .map(
             (doc) =>
@@ -779,7 +629,8 @@ class HotelCloudSyncService extends ChangeNotifier {
         closedRooms:
             (cloud['closedRooms'] ?? <String, Map<String, dynamic>>{}).values,
       );
-      if (_flatten(cloud).values.every((doc) => doc['deleted'] == true)) {
+      if (!HotelDataBuffer.cloudOnly &&
+          _flatten(cloud).values.every((doc) => doc['deleted'] == true)) {
         debugPrint('[CLOUD_RESTORE] skipped: cloud hotel data is empty');
         debugPrint('[CLOUD_RESTORE] complete');
         return false;
@@ -796,7 +647,7 @@ class HotelCloudSyncService extends ChangeNotifier {
       );
       // Preserve already downloaded local photos when their cloud hash matches.
       final previousGuests = _decodeGuests(
-        (await SharedPreferences.getInstance()).getString(
+        (await HotelDataBuffer.getInstance()).getString(
           CloudSyncService.customerKey,
         ),
       );
@@ -825,12 +676,16 @@ class HotelCloudSyncService extends ChangeNotifier {
       final int futureCount = rooms
           .where((Room room) => room.futureBooking)
           .length;
-      final int paymentCount = _liveCount(cloud['payments']);
+      final int paymentCount =
+          cloud['payments']?.values
+              .where((payment) => payment['deleted'] != true)
+              .length ??
+          0;
       final int bookingCount = rooms
           .where((Room room) => room.status == 'BOOKED')
           .length;
 
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
       {
         await prefs.setString(
           CloudSyncService.roomKey,
@@ -863,7 +718,17 @@ class HotelCloudSyncService extends ChangeNotifier {
       );
       await prefs.setString(CloudSyncService.expenseKey, jsonEncode(expenses));
 
-      final Map<String, dynamic>? settings = cloud['settings']?['hotel'];
+      final Map<String, dynamic>? settings =
+          cloud['settings']?['hotel'] ??
+          (HotelDataBuffer.cloudOnly
+              ? {
+                  'hotel_name':
+                      HotelFirestoreService.instance.account?.businessName ??
+                      'Hotel',
+                  'hotel_mobile':
+                      HotelFirestoreService.instance.account?.phoneNumber ?? '',
+                }
+              : null);
       if (settings != null && settings['deleted'] != true) {
         final Map<String, dynamic> localSettings = Map<String, dynamic>.from(
           codec.toLocalValue(settings) as Map,
@@ -934,6 +799,9 @@ class HotelCloudSyncService extends ChangeNotifier {
       await CustomerStore.loadCustomers();
       await BillStore.loadBills();
       await ExpenseStore.loadExpenses();
+      if (HotelDataBuffer.cloudOnly) {
+        _confirmedBuffer = HotelDataBuffer.checkpoint();
+      }
       remoteRevision++;
       lastSyncAt = DateTime.now();
       notifyListeners();
@@ -948,56 +816,8 @@ class HotelCloudSyncService extends ChangeNotifier {
     }
   }
 
-  bool _inventoryHasHotelData(_LocalInventory local) {
-    return policy.localHasHotelData(
-      roomsMissingOrEmpty: local.roomsMissingOrEmpty,
-      roomCount: local.rooms.length,
-      billCount: local.bills.length,
-      guestCount: local.guests.length,
-      expenseCount: local.expenses.length,
-      anyOccupiedOrClosedRoom: local.rooms.any(
-        (Room room) =>
-            room.status == 'BOOKED' ||
-            room.status == 'CLOSED' ||
-            room.status == 'CLEANING' ||
-            room.futureBooking,
-      ),
-      looksLikeFreshDefault: _looksLikeFreshDefault(local),
-    );
-  }
-
-  bool _looksLikeFreshDefault(_LocalInventory local) {
-    if (local.bills.isNotEmpty ||
-        local.guests.isNotEmpty ||
-        local.expenses.isNotEmpty) {
-      return false;
-    }
-    if (local.rooms.isEmpty || local.roomsMissingOrEmpty) {
-      return true;
-    }
-    for (final Room room in local.rooms) {
-      if (room.status == 'BOOKED' ||
-          room.status == 'CLOSED' ||
-          room.futureBooking ||
-          room.guestName.trim().isNotEmpty ||
-          room.partPayments.isNotEmpty) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  int _liveCount(Map<String, Map<String, dynamic>>? docs) {
-    if (docs == null) {
-      return 0;
-    }
-    return docs.values
-        .where((Map<String, dynamic> doc) => doc['deleted'] != true)
-        .length;
-  }
-
   Future<_LocalInventory> _localInventory() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
     final String? roomsRaw = prefs.getString(CloudSyncService.roomKey);
     final bool missing =
         roomsRaw == null || roomsRaw.isEmpty || roomsRaw == '[]';
@@ -1107,7 +927,7 @@ class HotelCloudSyncService extends ChangeNotifier {
   }
 
   Future<String> _deviceId() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
     var id = prefs.getString(_prefDeviceId);
     if (id == null || id.isEmpty) {
       id = 'dev_${DateTime.now().millisecondsSinceEpoch}';

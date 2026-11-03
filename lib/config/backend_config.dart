@@ -1,8 +1,8 @@
-/// Switch the running backend without deleting the Firebase project.
-/// Override with `--dart-define=HOTEL_API_BASE=https://api.2ndhealing.com`.
+// Historical cPanel compatibility configuration. The production app does not
+// import this file; main.dart connects directly to Firebase.
 enum HotelBackend { firebase, cpanel }
 
-const HotelBackend kHotelBackend = HotelBackend.cpanel;
+const HotelBackend kHotelBackend = HotelBackend.firebase;
 
 const String kApiBaseUrl = String.fromEnvironment(
   'HOTEL_API_BASE',

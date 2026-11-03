@@ -1,3 +1,4 @@
+// Historical compatibility code; excluded from the production app import graph.
 import 'dart:convert';
 import 'dart:io';
 
@@ -68,7 +69,9 @@ class CpanelApi {
     request.fields['guestId'] = guestId;
     request.fields['slot'] = slot;
     request.files.add(await http.MultipartFile.fromPath('photo', file.path));
-    final response = await _client.send(request).timeout(const Duration(seconds: 40));
+    final response = await _client
+        .send(request)
+        .timeout(const Duration(seconds: 40));
     final map = jsonDecode(await response.stream.bytesToString());
     if (response.statusCode >= 400 || map is! Map) {
       throw CpanelApiException(response.statusCode, 'Photo was not accepted');

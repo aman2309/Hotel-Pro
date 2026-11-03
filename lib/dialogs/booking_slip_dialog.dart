@@ -1,3 +1,7 @@
+import '../widgets/custom_bottom_sheet.dart';
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -12,7 +16,7 @@ import '../stores/customer_store.dart';
 import '../stores/hotel_settings_store.dart';
 
 Future<void> showBookingSlipDialog(BuildContext context, Room room) {
-  return showDialog<void>(
+  return showCustomBottomSheet<void>(
     context: context,
     builder: (BuildContext dialogContext) {
       return BookingSlipDialog(room: room);
@@ -21,10 +25,10 @@ Future<void> showBookingSlipDialog(BuildContext context, Room room) {
 }
 
 Future<void> showBookingSlipPrintView(BuildContext context, Room room) {
-  return showDialog<void>(
+  return showCustomBottomSheet<void>(
     context: context,
     builder: (BuildContext dialogContext) {
-      return Dialog(
+      return CustomSheetPanel(
         insetPadding: const EdgeInsets.all(24),
         child: SizedBox(
           width: 720,
@@ -46,7 +50,7 @@ Future<void> showBookingSlipPrintView(BuildContext context, Room room) {
                     ),
                     IconButton(
                       onPressed: () => Navigator.pop(dialogContext),
-                      icon: const Icon(Icons.close),
+                      icon: const Icon(Icons.close_rounded),
                     ),
                   ],
                 ),
@@ -283,10 +287,7 @@ Future<Uint8List> buildBookingSlipPdf(Room room) async {
           children: [
             pw.Text(
               title,
-              style: pw.TextStyle(
-                fontSize: 10,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 6),
             if (image == null)
@@ -427,7 +428,7 @@ class BookingSlipDialog extends StatelessWidget {
             width: double.infinity,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade400),
+              border: Border.all(color: CustomColors.border),
               borderRadius: BorderRadius.circular(8),
             ),
             child: bytes == null
@@ -482,7 +483,7 @@ class BookingSlipDialog extends StatelessWidget {
         detail("Stay", booking.stay),
         const SizedBox(height: 8),
         const Text(
-          "AADHAAR PHOTOS",
+          "Aadhaar photos",
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 8),
@@ -518,7 +519,7 @@ class BookingSlipDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<_SlipBooking> bookings = _slipBookings(room);
-    return AlertDialog(
+    return CustomDialog(
       title: Text("Room ${room.roomNumber} Booking Slip"),
       content: SizedBox(
         width: 520,
@@ -550,19 +551,19 @@ class BookingSlipDialog extends StatelessWidget {
         ),
       ),
       actions: [
-        TextButton(
+        CustomButton.text(
           onPressed: () => Navigator.pop(context),
-          child: const Text("CLOSE"),
+          child: const Text("Close"),
         ),
-        OutlinedButton.icon(
+        CustomButton.outlineIcon(
           onPressed: () => showBookingSlipPrintView(context, room),
-          icon: const Icon(Icons.preview),
-          label: const Text("PRINT VIEW"),
+          icon: const Icon(Icons.preview_rounded),
+          label: const Text("Print view"),
         ),
-        ElevatedButton.icon(
+        CustomButton.icon(
           onPressed: () => printBookingSlip(room),
-          icon: const Icon(Icons.print),
-          label: const Text("PRINT"),
+          icon: const Icon(Icons.print_rounded),
+          label: const Text("Print"),
         ),
       ],
     );

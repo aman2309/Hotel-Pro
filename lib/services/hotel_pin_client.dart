@@ -8,11 +8,15 @@ class HotelPinClient {
   Future<Map<String, dynamic>> Function(String pin)? debugRedeem;
 
   Future<Map<String, dynamic>> redeem(String pin) async {
-    final Future<Map<String, dynamic>> Function(String pin)? override = debugRedeem;
+    final Future<Map<String, dynamic>> Function(String pin)? override =
+        debugRedeem;
     if (override != null) return override(pin);
-    final HttpsCallable callable = FirebaseFunctions.instanceFor(region: 'asia-south1')
-        .httpsCallable('redeemHotelPin');
-    final HttpsCallableResult<dynamic> result = await callable.call(<String, dynamic>{'pin': pin});
+    final HttpsCallable callable = FirebaseFunctions.instanceFor(
+      region: 'asia-south1',
+    ).httpsCallable('redeemHotelPin');
+    final HttpsCallableResult<dynamic> result = await callable.call(
+      <String, dynamic>{'pin': pin},
+    );
     final data = result.data;
     if (data is Map) {
       return data.map((key, value) => MapEntry(key.toString(), value));

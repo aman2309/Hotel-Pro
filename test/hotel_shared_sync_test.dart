@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_first_app/services/hotel_sync_plan.dart';
+import 'package:my_first_app/services/hotel_data_buffer.dart';
 import 'package:my_first_app/services/hotel_record_ids.dart';
 import 'package:my_first_app/services/hotel_photo_ref.dart';
 import 'package:my_first_app/services/cloud_sync_service.dart';
@@ -12,6 +13,7 @@ import 'package:my_first_app/models/customer.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() {
+    HotelDataBuffer.clearSession();
     SharedPreferences.setMockInitialValues({});
     CustomerStore.customers.clear();
     BillStore.bills.clear();
@@ -31,34 +33,37 @@ void main() {
       'old-id',
     );
   });
-  test('a denied business list still opens the first hotel for a new number', () {
-    expect(
-      firstHotelForSignedInNumber(
-        userDocumentExists: false,
-        phoneIndexExists: false,
-      ),
-      isTrue,
-    );
-    expect(
-      firstHotelForSignedInNumber(
-        userDocumentExists: true,
-        phoneIndexExists: false,
-      ),
-      isFalse,
-    );
-    expect(
-      legacyHotelAfterList(uid: 'new-user', listPermissionDenied: true),
-      isNull,
-    );
-    expect(
-      legacyHotelAfterList(
-        uid: 'A',
-        listPermissionDenied: false,
-        legacyOwnedBusinesses: ['old-id'],
-      ),
-      'old-id',
-    );
-  });
+  test(
+    'a denied business list still opens the first hotel for a new number',
+    () {
+      expect(
+        firstHotelForSignedInNumber(
+          userDocumentExists: false,
+          phoneIndexExists: false,
+        ),
+        isTrue,
+      );
+      expect(
+        firstHotelForSignedInNumber(
+          userDocumentExists: true,
+          phoneIndexExists: false,
+        ),
+        isFalse,
+      );
+      expect(
+        legacyHotelAfterList(uid: 'new-user', listPermissionDenied: true),
+        isNull,
+      );
+      expect(
+        legacyHotelAfterList(
+          uid: 'A',
+          listPermissionDenied: false,
+          legacyOwnedBusinesses: ['old-id'],
+        ),
+        'old-id',
+      );
+    },
+  );
   test('foreign, contradictory, multiple mappings require review', () {
     expect(
       () => resolveHotelMapping(

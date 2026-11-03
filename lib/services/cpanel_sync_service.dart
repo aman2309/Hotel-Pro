@@ -1,3 +1,4 @@
+// Historical compatibility code; excluded from the production app import graph.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -5,7 +6,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'hotel_data_buffer.dart';
 
 import '../config/backend_config.dart';
 import 'cloud_sync_service.dart';
@@ -35,6 +36,13 @@ class CpanelSyncService extends ChangeNotifier {
     _queue = result.then((_) {}, onError: (Object _) {});
     return result;
   }
+
+  Future<void> logout() => _serial(() async {
+    await session.logout();
+    pendingConflicts = [];
+    lastError = null;
+    lastHttpStatus = null;
+  });
 
   Future<void> bootstrap() async {
     await session.restore();
@@ -68,7 +76,7 @@ class CpanelSyncService extends ChangeNotifier {
   }
 
   Future<void> keepThisPhone() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final revisions = _decodeIntMap(prefs.getString('hp_revisions'));
     for (final conflict in pendingConflicts) {
       final key = '${conflict['entity']}/${conflict['recordId']}';
@@ -80,7 +88,7 @@ class CpanelSyncService extends ChangeNotifier {
   }
 
   Future<void> useServerCopy() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     await prefs.setInt('hp_cursor', 0);
     pendingConflicts = [];
     await CpanelSession.rememberOutbox([]);
@@ -105,7 +113,7 @@ class CpanelSyncService extends ChangeNotifier {
       _publishSyncStatus();
       return;
     }
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final encoded = jsonEncode(changes);
     final previous = prefs.getString('hp_outbox');
     final key = previous == encoded
@@ -143,9 +151,13 @@ class CpanelSyncService extends ChangeNotifier {
             'changes': changes,
           },
         );
-        await _storeRevisions(List<Map<String, dynamic>>.from(
-          (result['applied'] as List).map((item) => Map<String, dynamic>.from(item as Map)),
-        ));
+        await _storeRevisions(
+          List<Map<String, dynamic>>.from(
+            (result['applied'] as List).map(
+              (item) => Map<String, dynamic>.from(item as Map),
+            ),
+          ),
+        );
         await CpanelSession.rememberOutbox([]);
         await prefs.remove('hp_outbox_key');
         pendingConflicts = [];
@@ -166,7 +178,9 @@ class CpanelSyncService extends ChangeNotifier {
           httpStatus: error.status,
           status: HotelCloudStatus.error,
         );
-        if (error.status == 409 || error.status == 403 || error.status == 413) return;
+        if (error.status == 409 || error.status == 403 || error.status == 413) {
+          return;
+        }
       } catch (_) {
         _fail(
           'Changes are saved on this phone and will sync when the server is reachable.',
@@ -188,7 +202,7 @@ class CpanelSyncService extends ChangeNotifier {
   }
 
   Future<void> _pullOnce() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final cursor = prefs.getInt('hp_cursor') ?? 0;
     final result = await _sendAuthorized('GET', '/v1/sync?cursor=$cursor');
     final remoteBusiness = result['businessId']?.toString();
@@ -241,7 +255,7 @@ class CpanelSyncService extends ChangeNotifier {
   }
 
   Future<bool> _downloadMissingGuestPhotos() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final guests = _list(prefs, CloudSyncService.customerKey);
     final changed = await _fetchMissingPhotos(guests);
     if (changed) {
@@ -251,7 +265,7 @@ class CpanelSyncService extends ChangeNotifier {
   }
 
   Future<List<Map<String, dynamic>>> _diff() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final acked = _decodeMap(prefs.getString('hp_acked'));
     final revisions = _decodeIntMap(prefs.getString('hp_revisions'));
     final current = await _localRecords();
@@ -283,7 +297,7 @@ class CpanelSyncService extends ChangeNotifier {
   }
 
   Future<Map<String, Map<String, dynamic>>> _localRecords() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final records = <String, Map<String, dynamic>>{};
     void add(String entity, String key, String idField) {
       final list = jsonDecode(prefs.getString(key) ?? '[]') as List;
@@ -296,6 +310,7 @@ class CpanelSyncService extends ChangeNotifier {
         records['$entity/$id'] = map;
       }
     }
+
     add('rooms', CloudSyncService.roomKey, 'roomNumber');
     add('bills', CloudSyncService.billKey, 'billNumber');
     add('guests', CloudSyncService.customerKey, 'customerId');
@@ -304,7 +319,8 @@ class CpanelSyncService extends ChangeNotifier {
       'hotel_name': prefs.getString('hotel_name') ?? 'Hotel',
       'hotel_address': prefs.getString('hotel_address') ?? '',
       'hotel_mobile': prefs.getString('hotel_mobile') ?? '',
-      'hotel_registration_number': prefs.getString('hotel_registration_number') ?? '',
+      'hotel_registration_number':
+          prefs.getString('hotel_registration_number') ?? '',
       'hotel_gst_number': prefs.getString('hotel_gst_number') ?? '',
       'hotel_gst_tax_rate': prefs.getDouble('hotel_gst_tax_rate') ?? 5,
       if (prefs.getString('hotel_admin_password') != null)
@@ -318,7 +334,7 @@ class CpanelSyncService extends ChangeNotifier {
     Set<String> protected = const {},
   }) async {
     if (changes.isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final grouped = <String, List<Map<String, dynamic>>>{
       'rooms': _list(prefs, CloudSyncService.roomKey),
       'bills': _list(prefs, CloudSyncService.billKey),
@@ -330,7 +346,9 @@ class CpanelSyncService extends ChangeNotifier {
     for (final change in changes) {
       final entity = change['entity']?.toString() ?? '';
       final id = change['recordId']?.toString() ?? '';
-      final payload = Map<String, dynamic>.from(change['payload'] as Map? ?? {});
+      final payload = Map<String, dynamic>.from(
+        change['payload'] as Map? ?? {},
+      );
       final key = '$entity/$id';
       if (protected.contains(key)) {
         final serverRevision = _asInt(change['revision']);
@@ -365,28 +383,64 @@ class CpanelSyncService extends ChangeNotifier {
       revisions['$entity/$id'] = _asInt(change['revision']);
       acked['$entity/$id'] = jsonEncode(stored);
     }
-    await prefs.setString(CloudSyncService.roomKey, jsonEncode(grouped['rooms']));
-    await prefs.setString(CloudSyncService.billKey, jsonEncode(grouped['bills']));
-    await prefs.setString(CloudSyncService.customerKey, jsonEncode(grouped['guests']));
-    await prefs.setString(CloudSyncService.expenseKey, jsonEncode(grouped['expenses']));
+    await prefs.setString(
+      CloudSyncService.roomKey,
+      jsonEncode(grouped['rooms']),
+    );
+    await prefs.setString(
+      CloudSyncService.billKey,
+      jsonEncode(grouped['bills']),
+    );
+    await prefs.setString(
+      CloudSyncService.customerKey,
+      jsonEncode(grouped['guests']),
+    );
+    await prefs.setString(
+      CloudSyncService.expenseKey,
+      jsonEncode(grouped['expenses']),
+    );
     await prefs.setString('hp_revisions', jsonEncode(revisions));
     await prefs.setString('hp_acked', jsonEncode(acked));
     if (await _fetchMissingPhotos(grouped['guests'] ?? [])) {
-      await prefs.setString(CloudSyncService.customerKey, jsonEncode(grouped['guests']));
+      await prefs.setString(
+        CloudSyncService.customerKey,
+        jsonEncode(grouped['guests']),
+      );
     }
     if (session.userId != null) {
       await CpanelSession.snapshotActiveCache(session.userId!);
     }
   }
 
-  Future<void> _applySettings(SharedPreferences prefs, Map<String, dynamic> payload) async {
-    await prefs.setString('hotel_name', payload['hotel_name']?.toString() ?? 'Hotel');
-    await prefs.setString('hotel_address', payload['hotel_address']?.toString() ?? '');
-    await prefs.setString('hotel_mobile', payload['hotel_mobile']?.toString() ?? '');
-    await prefs.setString('hotel_registration_number', payload['hotel_registration_number']?.toString() ?? '');
-    await prefs.setString('hotel_gst_number', payload['hotel_gst_number']?.toString() ?? '');
+  Future<void> _applySettings(
+    HotelDataBuffer prefs,
+    Map<String, dynamic> payload,
+  ) async {
+    await prefs.setString(
+      'hotel_name',
+      payload['hotel_name']?.toString() ?? 'Hotel',
+    );
+    await prefs.setString(
+      'hotel_address',
+      payload['hotel_address']?.toString() ?? '',
+    );
+    await prefs.setString(
+      'hotel_mobile',
+      payload['hotel_mobile']?.toString() ?? '',
+    );
+    await prefs.setString(
+      'hotel_registration_number',
+      payload['hotel_registration_number']?.toString() ?? '',
+    );
+    await prefs.setString(
+      'hotel_gst_number',
+      payload['hotel_gst_number']?.toString() ?? '',
+    );
     final rate = payload['hotel_gst_tax_rate'];
-    await prefs.setDouble('hotel_gst_tax_rate', rate is num ? rate.toDouble() : 5);
+    await prefs.setDouble(
+      'hotel_gst_tax_rate',
+      rate is num ? rate.toDouble() : 5,
+    );
     final admin = payload['hotel_admin_password']?.toString();
     if (admin != null && admin.isNotEmpty) {
       await prefs.setString('hotel_admin_password', admin);
@@ -394,14 +448,30 @@ class CpanelSyncService extends ChangeNotifier {
   }
 
   Future<bool> _uploadGuestPhotos() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final guests = _list(prefs, CloudSyncService.customerKey);
     var changed = false;
     for (final guest in guests) {
       final guestId = guest['customerId']?.toString() ?? '';
       if (guestId.isEmpty || session.accessToken == null) continue;
-      changed = await _uploadSlot(guest, guestId, 'front', 'idFrontPhotoPath', 'idFrontPhotoId') || changed;
-      changed = await _uploadSlot(guest, guestId, 'back', 'idBackPhotoPath', 'idBackPhotoId') || changed;
+      changed =
+          await _uploadSlot(
+            guest,
+            guestId,
+            'front',
+            'idFrontPhotoPath',
+            'idFrontPhotoId',
+          ) ||
+          changed;
+      changed =
+          await _uploadSlot(
+            guest,
+            guestId,
+            'back',
+            'idBackPhotoPath',
+            'idBackPhotoId',
+          ) ||
+          changed;
     }
     if (changed) {
       await prefs.setString(CloudSyncService.customerKey, jsonEncode(guests));
@@ -491,8 +561,26 @@ class CpanelSyncService extends ChangeNotifier {
     for (final guest in guests) {
       final guestId = guest['customerId']?.toString() ?? '';
       if (guestId.isEmpty) continue;
-      changed = await _fetchSlot(guest, guestId, 'front', 'idFrontPhotoPath', 'idFrontPhotoId', directory) || changed;
-      changed = await _fetchSlot(guest, guestId, 'back', 'idBackPhotoPath', 'idBackPhotoId', directory) || changed;
+      changed =
+          await _fetchSlot(
+            guest,
+            guestId,
+            'front',
+            'idFrontPhotoPath',
+            'idFrontPhotoId',
+            directory,
+          ) ||
+          changed;
+      changed =
+          await _fetchSlot(
+            guest,
+            guestId,
+            'back',
+            'idBackPhotoPath',
+            'idBackPhotoId',
+            directory,
+          ) ||
+          changed;
     }
     return changed;
   }
@@ -507,8 +595,12 @@ class CpanelSyncService extends ChangeNotifier {
   ) async {
     final photoId = guest[idField]?.toString() ?? '';
     final current = guest[pathField]?.toString() ?? '';
-    if (photoId.isEmpty || (current.isNotEmpty && File(current).existsSync())) return false;
-    final destination = File('${directory.path}/hotelpro_photos/$guestId-$slot.jpg');
+    if (photoId.isEmpty || (current.isNotEmpty && File(current).existsSync())) {
+      return false;
+    }
+    final destination = File(
+      '${directory.path}/hotelpro_photos/$guestId-$slot.jpg',
+    );
     try {
       await _downloadPhoto(photoId, destination);
       guest[pathField] = destination.path;
@@ -519,7 +611,7 @@ class CpanelSyncService extends ChangeNotifier {
   }
 
   Future<void> _storeRevisions(List<Map<String, dynamic>> applied) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final revisions = _decodeIntMap(prefs.getString('hp_revisions'));
     final acked = _decodeMap(prefs.getString('hp_acked'));
     final current = await _localRecords();
@@ -534,8 +626,12 @@ class CpanelSyncService extends ChangeNotifier {
 
   void applyLicense(Map<String, dynamic> license) {
     final now = DateTime.now().toUtc();
-    final trialStart = DateTime.tryParse(license['trialStartedAt']?.toString() ?? '');
-    final trialEnd = DateTime.tryParse(license['trialEndsAt']?.toString() ?? '');
+    final trialStart = DateTime.tryParse(
+      license['trialStartedAt']?.toString() ?? '',
+    );
+    final trialEnd = DateTime.tryParse(
+      license['trialEndsAt']?.toString() ?? '',
+    );
     final expires = DateTime.tryParse(license['expiresAt']?.toString() ?? '');
     final assessment = assessHotelLicense(
       readFailed: false,
@@ -554,10 +650,11 @@ class CpanelSyncService extends ChangeNotifier {
       final canWrite = license['canWrite'] == true;
       service.cloudView = canWrite
           ? (expires != null && now.isBefore(expires)
-              ? HotelLicenseView.activated
-              : HotelLicenseView.trial)
+                ? HotelLicenseView.activated
+                : HotelLicenseView.trial)
           : HotelLicenseView.expired;
-      service.statusMessage = canWrite &&
+      service.statusMessage =
+          canWrite &&
               (assessment.view == HotelLicenseView.missing ||
                   assessment.view == HotelLicenseView.unreadable)
           ? 'Trial is active.'
@@ -571,7 +668,7 @@ class CpanelSyncService extends ChangeNotifier {
     service.notifyListeners();
   }
 
-  List<Map<String, dynamic>> _list(SharedPreferences prefs, String key) {
+  List<Map<String, dynamic>> _list(HotelDataBuffer prefs, String key) {
     final raw = jsonDecode(prefs.getString(key) ?? '[]') as List;
     return raw.map((item) => Map<String, dynamic>.from(item as Map)).toList();
   }
@@ -586,7 +683,9 @@ class CpanelSyncService extends ChangeNotifier {
   Map<String, String> _decodeMap(String? raw) {
     if (raw == null || raw.isEmpty) return {};
     final decoded = jsonDecode(raw) as Map;
-    return decoded.map((key, value) => MapEntry(key.toString(), value.toString()));
+    return decoded.map(
+      (key, value) => MapEntry(key.toString(), value.toString()),
+    );
   }
 
   Map<String, int> _decodeIntMap(String? raw) {
@@ -610,7 +709,8 @@ class CpanelSyncService extends ChangeNotifier {
       }
     }
     for (final field in const ['idFrontPhotoId', 'idBackPhotoId']) {
-      if ((merged[field] == null || merged[field] == '') && local[field] != null) {
+      if ((merged[field] == null || merged[field] == '') &&
+          local[field] != null) {
         merged[field] = local[field];
       }
     }
@@ -628,21 +728,26 @@ class CpanelSyncService extends ChangeNotifier {
     return role == 'owner';
   }
 
-  List<Map<String, dynamic>> _changesForServer(List<Map<String, dynamic>> changes) {
+  List<Map<String, dynamic>> _changesForServer(
+    List<Map<String, dynamic>> changes,
+  ) {
     return changes.map((change) {
       final copy = Map<String, dynamic>.from(change);
       final payload = copy['payload'];
       if (payload is Map) {
-        copy['payload'] = syncPayloadForServer(Map<String, dynamic>.from(payload));
+        copy['payload'] = syncPayloadForServer(
+          Map<String, dynamic>.from(payload),
+        );
       }
       return copy;
     }).toList();
   }
 
-  String _idempotencyKey(String encoded) => sha256.convert(utf8.encode(encoded)).toString();
+  String _idempotencyKey(String encoded) =>
+      sha256.convert(utf8.encode(encoded)).toString();
 
   Future<Set<String>> _pendingKeys() async {
-    final raw = (await SharedPreferences.getInstance()).getString('hp_outbox');
+    final raw = (await HotelDataBuffer.getInstance()).getString('hp_outbox');
     if (raw == null || raw.isEmpty) return {};
     try {
       final list = jsonDecode(raw) as List;
@@ -661,7 +766,12 @@ class CpanelSyncService extends ChangeNotifier {
     Map<String, dynamic>? body,
   }) async {
     try {
-      return await api.send(method, path, body: body, accessToken: session.accessToken);
+      return await api.send(
+        method,
+        path,
+        body: body,
+        accessToken: session.accessToken,
+      );
     } on CpanelApiException catch (error) {
       if (error.status != 401 || session.refreshToken == null) rethrow;
       final refreshed = await api.send(
@@ -670,7 +780,12 @@ class CpanelSyncService extends ChangeNotifier {
         body: {'refreshToken': session.refreshToken},
       );
       await session.updateTokens(refreshed);
-      return await api.send(method, path, body: body, accessToken: session.accessToken);
+      return await api.send(
+        method,
+        path,
+        body: body,
+        accessToken: session.accessToken,
+      );
     }
   }
 

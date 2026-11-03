@@ -1,3 +1,7 @@
+import '../widgets/custom_bottom_sheet.dart';
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -102,9 +106,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
 
   Future<void> _pickCountry() async {
     final CountryDialCode?
-    selected = await showModalBottomSheet<CountryDialCode>(
+    selected = await showCustomBottomSheet<CountryDialCode>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: CustomColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -154,7 +158,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1565C0),
+      backgroundColor: CustomColors.primary,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -171,19 +175,19 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                       height: 88,
                       fit: BoxFit.cover,
                       errorBuilder: (_, _, _) => const Icon(
-                        Icons.hotel,
+                        Icons.hotel_rounded,
                         size: 72,
-                        color: Colors.white,
+                        color: CustomColors.surface,
                       ),
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'Hotel Pro 1',
+                  'Hotel Pro',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white,
+                    color: CustomColors.surface,
                     fontSize: 28,
                     fontWeight: FontWeight.w800,
                   ),
@@ -193,7 +197,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                   'Mobile number se OTP login karein.\nEk number se dono phones par wahi hotel khulega.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white70,
+                    color: CustomColors.muted,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
@@ -202,7 +206,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: CustomColors.surface,
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
@@ -227,7 +231,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                                 vertical: 14,
                               ),
                               decoration: BoxDecoration(
-                                border: Border.all(color: Colors.black26),
+                                border: Border.all(color: CustomColors.border),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Row(
@@ -240,14 +244,17 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                                     ),
                                   ),
                                   const SizedBox(width: 4),
-                                  const Icon(Icons.arrow_drop_down, size: 20),
+                                  const Icon(
+                                    Icons.arrow_drop_down_rounded,
+                                    size: 20,
+                                  ),
                                 ],
                               ),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: TextField(
+                            child: CustomTextField(
                               controller: _numberController,
                               focusNode: _numberFocus,
                               enabled: !_sending,
@@ -275,7 +282,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                       Text(
                         'Default country code is +91. Tap the code to change it.',
                         style: TextStyle(
-                          color: Colors.grey.shade700,
+                          color: CustomColors.muted,
                           fontSize: 12,
                         ),
                       ),
@@ -284,7 +291,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                         Text(
                           _error!,
                           style: const TextStyle(
-                            color: Color(0xFFC62828),
+                            color: CustomColors.error,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -292,11 +299,11 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                       const SizedBox(height: 18),
                       SizedBox(
                         height: 48,
-                        child: ElevatedButton(
+                        child: CustomButton(
                           onPressed: _sending ? null : () => _sendOtp(),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1565C0),
-                            foregroundColor: Colors.white,
+                            backgroundColor: CustomColors.primary,
+                            foregroundColor: CustomColors.surface,
                           ),
                           child: _sending
                               ? const SizedBox(
@@ -304,11 +311,11 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                                   height: 22,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2.4,
-                                    color: Colors.white,
+                                    color: CustomColors.surface,
                                   ),
                                 )
                               : const Text(
-                                  'SEND OTP',
+                                  'Send OTP',
                                   style: TextStyle(
                                     fontWeight: FontWeight.w800,
                                     letterSpacing: 0.4,

@@ -1,17 +1,20 @@
+import '../widgets/custom_bottom_sheet.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/hotel_data_buffer.dart';
 import '../services/hotel_cloud_sync_service.dart';
 import '../services/phone_auth_service.dart';
 import '../services/hotel_photo_storage_service.dart';
 
 Future<void> showHotelSyncReview(BuildContext context) async {
   final sync = HotelCloudSyncService.instance;
-  await showDialog<void>(
+  await showCustomBottomSheet<void>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
+    builder: (dialogContext) => CustomDialog(
       title: const Text('Hotel sync / saved records'),
       content: SingleChildScrollView(
         child: Text(
@@ -22,13 +25,13 @@ Future<void> showHotelSyncReview(BuildContext context) async {
         ),
       ),
       actions: [
-        TextButton(
+        CustomButton.text(
           onPressed: () => Navigator.pop(dialogContext),
           child: const Text('Close'),
         ),
-        TextButton(
+        CustomButton.text(
           onPressed: () async {
-            final prefs = await SharedPreferences.getInstance();
+            final prefs = await HotelDataBuffer.getInstance();
             final archives = <String, dynamic>{};
             for (final key in prefs.getKeys().where(
               (key) => key.startsWith('hotel_archive_'),
@@ -49,7 +52,7 @@ Future<void> showHotelSyncReview(BuildContext context) async {
           },
           child: const Text('Export saved copies'),
         ),
-        TextButton(
+        CustomButton.text(
           onPressed: () async {
             try {
               await sync.retry();
@@ -62,22 +65,22 @@ Future<void> showHotelSyncReview(BuildContext context) async {
         ),
         if (sync.lastError != null ||
             HotelPhotoStorageService.instance.lastPhotoError != null)
-          TextButton(
+          CustomButton.text(
             onPressed: () async {
-              final confirmed = await showDialog<bool>(
+              final confirmed = await showCustomBottomSheet<bool>(
                 context: dialogContext,
-                builder: (confirmContext) => AlertDialog(
+                builder: (confirmContext) => CustomDialog(
                   title: const Text('Use cloud after review?'),
                   content: const Text(
                     'Your pending changes remain in a saved archive. '
                     'Check both copies, especially bookings and received payments, before continuing.',
                   ),
                   actions: [
-                    TextButton(
+                    CustomButton.text(
                       onPressed: () => Navigator.pop(confirmContext, false),
                       child: const Text('Cancel'),
                     ),
-                    TextButton(
+                    CustomButton.text(
                       onPressed: () => Navigator.pop(confirmContext, true),
                       child: const Text('Keep archive and use cloud'),
                     ),

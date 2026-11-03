@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'services/hotel_data_buffer.dart';
 
 import 'models/bill_record.dart';
 import 'models/customer.dart';
@@ -33,14 +33,17 @@ Widget wrapSalesDemoBanner(BuildContext context, Widget? child) {
             child: SizedBox(
               width: double.infinity,
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 6,
+                  horizontal: 12,
+                ),
                 child: Text(
                   'DEMO / SALES SAMPLE — fake data only · cloud OFF',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
@@ -55,7 +58,7 @@ Widget wrapSalesDemoBanner(BuildContext context, Widget? child) {
 /// Seeds sample hotel data once (separate app id → empty prefs on install).
 Future<void> seedHotelSalesDemoIfNeeded() async {
   if (!kSalesDemoMode) return;
-  final prefs = await SharedPreferences.getInstance();
+  final prefs = await HotelDataBuffer.getInstance();
   if (prefs.getBool('sales_demo_seeded_v1') == true) return;
 
   CloudSyncService.autoSyncPaused = true;

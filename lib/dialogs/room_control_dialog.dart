@@ -1,3 +1,10 @@
+import '../widgets/live_stay_duration.dart';
+import '../widgets/custom_bottom_sheet.dart';
+import '../widgets/custom_dropdown.dart';
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
+import '../widgets/custom_text_field.dart';
 import '../services/hotel_record_ids.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -70,14 +77,14 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
     return grandTotal() - room.advance - totalPartPayments();
   }
 
-  return showDialog<String>(
+  return showCustomBottomSheet<String>(
     context: context,
     builder: (BuildContext dialogContext) {
       return StatefulBuilder(
         builder: (BuildContext context, StateSetter updateDialog) {
           Future<void> addBilling() async {
             final Map<String, dynamic>? charge =
-                await showDialog<Map<String, dynamic>>(
+                await showCustomBottomSheet<Map<String, dynamic>>(
                   context: dialogContext,
                   useRootNavigator: true,
                   builder: (BuildContext billingContext) {
@@ -99,7 +106,7 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
           Future<void> addDays() async {
             final daysController = TextEditingController();
 
-            final bool? daysAdded = await showDialog<bool>(
+            final bool? daysAdded = await showCustomBottomSheet<bool>(
               context: dialogContext,
               builder: (BuildContext daysContext) {
                 void saveDays() {
@@ -120,8 +127,8 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                   Navigator.pop(daysContext, true);
                 }
 
-                return AlertDialog(
-                  title: const Text("ADD DAYS"),
+                return CustomDialog(
+                  title: const Text("Add days"),
                   content: SizedBox(
                     width: 400,
                     child: Column(
@@ -140,14 +147,14 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                           style: const TextStyle(fontSize: 16),
                         ),
                         const SizedBox(height: 15),
-                        TextField(
+                        CustomTextField(
                           controller: daysController,
                           autofocus: true,
                           keyboardType: TextInputType.number,
                           textInputAction: TextInputAction.done,
                           decoration: const InputDecoration(
                             labelText: "Additional Days",
-                            prefixIcon: Icon(Icons.add),
+                            prefixIcon: Icon(Icons.add_rounded),
                             border: OutlineInputBorder(),
                           ),
                           onSubmitted: (value) {
@@ -158,16 +165,16 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                     ),
                   ),
                   actions: [
-                    TextButton(
+                    CustomButton.text(
                       onPressed: () {
                         Navigator.pop(daysContext, false);
                       },
-                      child: const Text("CANCEL"),
+                      child: const Text("Cancel"),
                     ),
-                    ElevatedButton.icon(
+                    CustomButton.icon(
                       onPressed: saveDays,
-                      icon: const Icon(Icons.add_circle),
-                      label: const Text("ADD DAYS"),
+                      icon: const Icon(Icons.add_circle_rounded),
+                      label: const Text("Add days"),
                     ),
                   ],
                 );
@@ -187,7 +194,7 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
 
             String paymentMode = "Cash";
 
-            final bool? paymentSaved = await showDialog<bool>(
+            final bool? paymentSaved = await showCustomBottomSheet<bool>(
               context: dialogContext,
               builder: (BuildContext paymentContext) {
                 return StatefulBuilder(
@@ -216,8 +223,8 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                           Navigator.pop(paymentContext, true);
                         }
 
-                        return AlertDialog(
-                          title: const Text("PART PAYMENT"),
+                        return CustomDialog(
+                          title: const Text("Part payment"),
                           content: SizedBox(
                             width: 400,
                             child: Column(
@@ -230,7 +237,7 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                                TextField(
+                                CustomTextField(
                                   controller: amountController,
                                   focusNode: amountFocus,
                                   autofocus: true,
@@ -241,14 +248,16 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                                   textInputAction: TextInputAction.next,
                                   decoration: const InputDecoration(
                                     labelText: "Payment Amount",
-                                    prefixIcon: Icon(Icons.currency_rupee),
+                                    prefixIcon: Icon(
+                                      Icons.currency_rupee_rounded,
+                                    ),
                                   ),
                                   onSubmitted: (value) {
                                     paymentModeFocus.requestFocus();
                                   },
                                 ),
                                 const SizedBox(height: 15),
-                                DropdownButtonFormField<String>(
+                                CustomDropdown<String>(
                                   initialValue: paymentMode,
                                   focusNode: paymentModeFocus,
                                   decoration: const InputDecoration(
@@ -287,17 +296,17 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                             ),
                           ),
                           actions: [
-                            TextButton(
+                            CustomButton.text(
                               onPressed: () {
                                 Navigator.pop(paymentContext, false);
                               },
-                              child: const Text("CANCEL"),
+                              child: const Text("Cancel"),
                             ),
-                            ElevatedButton.icon(
+                            CustomButton.icon(
                               focusNode: savePaymentFocus,
                               onPressed: savePayment,
-                              icon: const Icon(Icons.save),
-                              label: const Text("SAVE PAYMENT"),
+                              icon: const Icon(Icons.save_rounded),
+                              label: const Text("Save payment"),
                             ),
                           ],
                         );
@@ -359,12 +368,12 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
           }
 
           void viewBill() {
-            showDialog(
+            showCustomBottomSheet(
               context: dialogContext,
               builder: (BuildContext billContext) {
                 return StatefulBuilder(
                   builder: (BuildContext context, StateSetter setBill) {
-                    return AlertDialog(
+                    return CustomDialog(
                       title: Text("Room ${room.roomNumber} Bill"),
                       content: SizedBox(
                         width: 430,
@@ -430,7 +439,7 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                               Text("ADVANCE : ₹${room.advance}"),
                               const Divider(),
                               const Text(
-                                "PART PAYMENTS",
+                                "Part payments",
                                 style: TextStyle(fontWeight: FontWeight.bold),
                               ),
                               if (room.partPayments.isEmpty)
@@ -474,11 +483,11 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                         ),
                       ),
                       actions: [
-                        TextButton(
+                        CustomButton.text(
                           onPressed: () {
                             Navigator.pop(billContext);
                           },
-                          child: const Text("CLOSE"),
+                          child: const Text("Close"),
                         ),
                       ],
                     );
@@ -488,7 +497,7 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
             );
           }
 
-          return AlertDialog(
+          return CustomDialog(
             title: Text("ROOM ${room.roomNumber}"),
             content: SizedBox(
               width: 480,
@@ -500,7 +509,7 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                     const Text(
                       "● BOOKED",
                       style: TextStyle(
-                        color: Colors.red,
+                        color: CustomColors.error,
                         fontSize: 19,
                         fontWeight: FontWeight.bold,
                       ),
@@ -521,6 +530,11 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                         "${room.bookingDate!.year}",
                       ),
                     Text("Stay : ${room.days} Days"),
+                    LiveStayDuration(
+                      start: room.bookingTime,
+                      checkout: room.checkoutTime,
+                      prefix: 'Elapsed: ',
+                    ),
                     const Divider(),
                     Text(
                       "Current Bill : ₹${totalBill()}",
@@ -556,38 +570,38 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                     const SizedBox(height: 4),
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
+                      child: CustomButton.icon(
                         onPressed: addDays,
-                        icon: const Icon(Icons.more_time),
-                        label: const Text("ADD DAYS"),
+                        icon: const Icon(Icons.more_time_rounded),
+                        label: const Text("Add days"),
                       ),
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
+                      child: CustomButton.icon(
                         onPressed: addBilling,
-                        icon: const Icon(Icons.add_card),
-                        label: const Text("ADD BILLING"),
+                        icon: const Icon(Icons.add_card_rounded),
+                        label: const Text("Add billing"),
                       ),
                     ),
                     const SizedBox(height: 4),
                     SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
+                      child: CustomButton.outlineIcon(
                         onPressed: viewBill,
-                        icon: const Icon(Icons.receipt_long),
-                        label: const Text("VIEW BILL"),
+                        icon: const Icon(Icons.receipt_long_rounded),
+                        label: const Text("View bill"),
                       ),
                     ),
                     const SizedBox(height: 4),
 
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
+                      child: CustomButton.icon(
                         onPressed: addPartPayment,
-                        icon: const Icon(Icons.payments),
-                        label: const Text("PART PAYMENT"),
+                        icon: const Icon(Icons.payments_rounded),
+                        label: const Text("Part payment"),
                       ),
                     ),
 
@@ -595,25 +609,38 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
 
                     SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
+                      child: CustomButton.outlineIcon(
                         onPressed: () async {
                           await showBookingViewDialog(dialogContext, room);
                         },
-                        icon: const Icon(Icons.visibility),
-                        label: const Text("VIEW BOOKING"),
+                        icon: const Icon(Icons.visibility_rounded),
+                        label: const Text("View booking"),
                       ),
                     ),
+
+                    if (room.futureBooking) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: CustomButton.outlineIcon(
+                          onPressed: () =>
+                              Navigator.pop(dialogContext, 'CANCEL_FUTURE'),
+                          icon: const Icon(Icons.event_busy_rounded),
+                          label: const Text('Cancel future booking'),
+                        ),
+                      ),
+                    ],
 
                     const SizedBox(height: 4),
 
                     SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
+                      child: CustomButton.outlineIcon(
                         onPressed: () async {
                           await showBookingSlipDialog(dialogContext, room);
                         },
                         icon: const Icon(Icons.badge_outlined),
-                        label: const Text("BOOKING SLIP"),
+                        label: const Text("Booking slip"),
                       ),
                     ),
 
@@ -621,12 +648,12 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
 
                     SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
+                      child: CustomButton.outlineIcon(
                         onPressed: () {
                           Navigator.pop(dialogContext, "CHANGE_ROOM");
                         },
-                        icon: const Icon(Icons.swap_horiz),
-                        label: const Text("CHANGE ROOM"),
+                        icon: const Icon(Icons.swap_horiz_rounded),
+                        label: const Text("Change room"),
                       ),
                     ),
 
@@ -639,9 +666,9 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                       child: IgnorePointer(
                         child: SizedBox(
                           width: double.infinity,
-                          child: OutlinedButton.icon(
+                          child: CustomButton.outlineIcon(
                             onPressed: () {},
-                            icon: const Icon(Icons.percent),
+                            icon: const Icon(Icons.percent_rounded),
                             label: Text(
                               room.applyGst
                                   ? "GST ${HotelSettingsStore.gstRateLabel()}% ADDED"
@@ -656,10 +683,10 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
 
                     SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
+                      child: CustomButton.outlineIcon(
                         onPressed: printBillOptions,
-                        icon: const Icon(Icons.print),
-                        label: const Text("PRINT BILL"),
+                        icon: const Icon(Icons.print_rounded),
+                        label: const Text("Print bill"),
                       ),
                     ),
 
@@ -667,11 +694,11 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
 
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton.icon(
+                      child: CustomButton.icon(
                         onPressed: () {
                           Navigator.pop(dialogContext, "CHECKOUT");
                         },
-                        icon: const Icon(Icons.payment),
+                        icon: const Icon(Icons.payment_rounded),
                         label: const Text("CHECKOUT & PAYMENT"),
                       ),
                     ),
@@ -680,11 +707,11 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
               ),
             ),
             actions: [
-              TextButton(
+              CustomButton.text(
                 onPressed: () {
                   Navigator.pop(dialogContext, "CLOSE");
                 },
-                child: const Text("CLOSE"),
+                child: const Text("Close"),
               ),
             ],
           );
@@ -726,14 +753,14 @@ class _AddBillingDialogState extends State<AddBillingDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return CustomDialog(
       title: const Text("Add Billing / Charge"),
       content: SizedBox(
         width: 420,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
+            CustomTextField(
               autofocus: true,
               textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
@@ -744,7 +771,7 @@ class _AddBillingDialogState extends State<AddBillingDialog> {
                 particular = value;
               },
             ),
-            TextField(
+            CustomTextField(
               keyboardType: TextInputType.number,
               textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
@@ -757,7 +784,7 @@ class _AddBillingDialogState extends State<AddBillingDialog> {
                 });
               },
             ),
-            TextField(
+            CustomTextField(
               keyboardType: TextInputType.number,
               textInputAction: TextInputAction.done,
               decoration: const InputDecoration(
@@ -788,13 +815,13 @@ class _AddBillingDialogState extends State<AddBillingDialog> {
         ),
       ),
       actions: [
-        TextButton(
+        CustomButton.text(
           onPressed: () {
             Navigator.of(context).pop();
           },
-          child: const Text("CANCEL"),
+          child: const Text("Cancel"),
         ),
-        ElevatedButton(onPressed: saveCharge, child: const Text("ADD CHARGE")),
+        CustomButton(onPressed: saveCharge, child: const Text("Add charge")),
       ],
     );
   }

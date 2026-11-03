@@ -17,8 +17,18 @@ String formatLicenseRemaining(Duration left) {
 
 String formatLicenseDate(DateTime date) {
   const months = <String>[
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   final DateTime utc = date.toUtc();
   return '${utc.day} ${months[utc.month - 1]} ${utc.year}';
@@ -51,13 +61,13 @@ HotelLicenseAssessment assessHotelLicense({
     final Duration left = expiresAt.difference(now);
     return HotelLicenseAssessment(
       HotelLicenseView.activated,
-      'License ${formatLicenseDate(expiresAt)} tak. ${formatLicenseRemaining(left)}. Renew with PIN',
+      'License ${formatLicenseDate(expiresAt)} tak. ${formatLicenseRemaining(left)}. Renew with a license key',
     );
   }
   if (expiresAt != null || (activated && expiresAt == null)) {
     return const HotelLicenseAssessment(
       HotelLicenseView.expired,
-      'License khatam. Renew with PIN. Purana data safe hai.',
+      'License khatam. Renew with a license key. Purana data safe hai.',
     );
   }
   final DateTime? trialEnd =
@@ -71,7 +81,7 @@ HotelLicenseAssessment assessHotelLicense({
   if (trialEnd != null) {
     return const HotelLicenseAssessment(
       HotelLicenseView.expired,
-      'Trial khatam. 8 digit PIN daalein. Purana data safe hai.',
+      'Trial khatam. License key daalein. Purana data safe hai.',
     );
   }
   return const HotelLicenseAssessment(
@@ -90,7 +100,7 @@ void requireVerifiedLicenseOrigin({
       !createdBusinessThisSession &&
       !administratorApprovedReset) {
     throw StateError(
-      'पुराने होटल का cloud trial/PIN record नहीं मिला। सुरक्षित backup से '
+      'पुराने होटल का cloud trial/license record नहीं मिला। सुरक्षित backup से '
       'activation recovery की समीक्षा जरूरी है। नया trial शुरू नहीं किया गया।',
     );
   }

@@ -1,3 +1,6 @@
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_text_field.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -108,7 +111,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     for (int i = 0; i < _otpLength; i++) {
       _digits[i].text = i < digits.length ? digits[i] : '';
     }
-    final int next = digits.length >= _otpLength ? _otpLength - 1 : digits.length;
+    final int next = digits.length >= _otpLength
+        ? _otpLength - 1
+        : digits.length;
     _focusNodes[next.clamp(0, _otpLength - 1)].requestFocus();
     if (digits.length >= _otpLength) {
       unawaited(_verify());
@@ -181,9 +186,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           _resendToken = sent.resendToken;
         });
         _startCountdown();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('OTP sent again.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('OTP sent again.')));
       },
       onAutoVerified: (_) {
         if (!mounted) {
@@ -212,10 +217,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1565C0),
+      backgroundColor: CustomColors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1565C0),
-        foregroundColor: Colors.white,
+        backgroundColor: CustomColors.background,
+        foregroundColor: CustomColors.text,
         elevation: 0,
         title: const Text('Verify OTP'),
       ),
@@ -229,14 +234,28 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: CustomColors.surface,
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
                     children: [
+                      const Icon(
+                        Icons.mark_email_read_outlined,
+                        color: CustomColors.button,
+                        size: 44,
+                      ),
+                      const SizedBox(height: 18),
+                      const Text(
+                        'Verify your number',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
                       Text(
                         'Enter the 6-digit OTP sent to',
-                        style: TextStyle(color: Colors.grey.shade800),
+                        style: TextStyle(color: CustomColors.text),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -248,14 +267,18 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                       ),
                       const SizedBox(height: 22),
                       Row(
-                        children: List<Widget>.generate(_otpLength, (int index) {
+                        children: List<Widget>.generate(_otpLength, (
+                          int index,
+                        ) {
                           return Expanded(
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 3),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 3,
+                              ),
                               child: Focus(
                                 onKeyEvent: (_, KeyEvent event) =>
                                     _onKey(index, event),
-                                child: TextField(
+                                child: CustomTextField(
                                   controller: _digits[index],
                                   focusNode: _focusNodes[index],
                                   enabled: !_verifying,
@@ -272,6 +295,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                                   decoration: const InputDecoration(
                                     border: OutlineInputBorder(),
                                     counterText: '',
+                                    contentPadding: EdgeInsets.symmetric(
+                                      vertical: 17,
+                                      horizontal: 0,
+                                    ),
                                   ),
                                   onChanged: (String value) =>
                                       _onDigitChanged(index, value),
@@ -287,7 +314,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                           _error!,
                           textAlign: TextAlign.center,
                           style: const TextStyle(
-                            color: Color(0xFFC62828),
+                            color: CustomColors.error,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -296,11 +323,11 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                       SizedBox(
                         width: double.infinity,
                         height: 48,
-                        child: ElevatedButton(
+                        child: CustomButton(
                           onPressed: _verifying ? null : _verify,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1565C0),
-                            foregroundColor: Colors.white,
+                            backgroundColor: CustomColors.background,
+                            foregroundColor: CustomColors.text,
                           ),
                           child: _verifying
                               ? const SizedBox(
@@ -308,11 +335,11 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                                   height: 22,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2.4,
-                                    color: Colors.white,
+                                    color: CustomColors.surface,
                                   ),
                                 )
                               : const Text(
-                                  'VERIFY OTP',
+                                  'Verify OTP',
                                   style: TextStyle(
                                     fontWeight: FontWeight.w800,
                                     letterSpacing: 0.4,
@@ -334,12 +361,12 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                         Text(
                           'Resend OTP in ${_secondsLeft}s',
                           style: TextStyle(
-                            color: Colors.grey.shade700,
+                            color: CustomColors.muted,
                             fontWeight: FontWeight.w600,
                           ),
                         )
                       else
-                        TextButton(
+                        CustomButton.text(
                           onPressed: _resend,
                           child: const Text(
                             'Resend OTP',

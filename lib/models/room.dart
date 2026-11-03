@@ -1,5 +1,8 @@
+import '../utils/stay_duration.dart' as stay;
+
 class Room {
   int roomNumber;
+  String floorId;
   String? roomName;
   String roomType;
   int normalRent;
@@ -43,6 +46,7 @@ class Room {
 
   Room({
     required this.roomNumber,
+    this.floorId = '',
     this.roomName = "",
     required this.roomType,
     required this.normalRent,
@@ -88,6 +92,7 @@ class Room {
   /// fields from disk/cloud.
   void copyFrom(Room other) {
     roomNumber = other.roomNumber;
+    floorId = other.floorId;
     roomName = other.safeRoomName;
     roomType = other.roomType;
     normalRent = other.normalRent;
@@ -167,6 +172,7 @@ class Room {
   Map<String, dynamic> toJson() {
     return {
       "roomNumber": roomNumber,
+      if (floorId.isNotEmpty) "floorId": floorId,
       "roomName": safeRoomName,
       "roomType": roomType,
       "normalRent": normalRent,
@@ -207,6 +213,7 @@ class Room {
   factory Room.fromJson(Map<String, dynamic> json) {
     return Room(
       roomNumber: json["roomNumber"] as int,
+      floorId: json["floorId"]?.toString() ?? "",
       roomName: json["roomName"]?.toString() ?? "",
       roomType: json["roomType"] as String,
       normalRent: json["normalRent"] as int,
@@ -282,17 +289,9 @@ class Room {
     return "ROOM $roomNumber";
   }
 
-  /// Elapsed stay as days, hours, and minutes, for example `36 D 4 H 27 M`.
-  String stayDurationLabel([DateTime? now]) {
-    final DateTime? start = bookingTime;
-    if (start == null) return "-";
-    final Duration diff = (now ?? DateTime.now()).difference(start);
-    if (diff.isNegative) return "0 D 0 H 0 M";
-    final int days = diff.inDays;
-    final int hours = diff.inHours % 24;
-    final int minutes = diff.inMinutes % 60;
-    return "$days D $hours H $minutes M";
-  }
+  /// Total elapsed hours/minutes; actual checkout is the immutable endpoint.
+  String stayDurationLabel([DateTime? now]) =>
+      stay.stayDurationLabel(bookingTime, checkout: checkoutTime, now: now);
 
   static String extraChargeTitle(Map<String, dynamic> charge) {
     final String name = charge["name"]?.toString() ?? "-";

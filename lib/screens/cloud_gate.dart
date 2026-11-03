@@ -1,3 +1,4 @@
+import '../widgets/custom_button.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -5,21 +6,23 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../services/hotel_cloud_sync_service.dart';
+import '../services/hotel_data_buffer.dart';
 import '../services/hotel_firestore_service.dart';
 import '../services/hotel_onboarding_service.dart';
 import '../services/hotel_license_policy.dart';
 import '../services/license_service.dart';
 import '../services/phone_auth_service.dart';
+import '../services/password_auth_service.dart';
 import '../stores/bill_store.dart';
 import '../stores/customer_store.dart';
 import '../stores/expense_store.dart';
 import '../stores/hotel_settings_store.dart';
-import 'phone_login_screen.dart';
+import 'hotel_auth_screen.dart';
 import 'room_dashboard.dart';
 
 enum _GatePhase { loading, login, failed, expired, ready, desktop }
 
-/// Android startup: phone auth, owner mapping, then cloud restore.
+/// Restore the native Firebase login, verify its hotel, then read server data.
 /// A failed read stays on this screen and is never shown as an empty hotel.
 class CloudGate extends StatefulWidget {
   const CloudGate({super.key, required this.firebaseReady});
@@ -59,15 +62,31 @@ class _CloudGateState extends State<CloudGate> {
 
   Future<void> _resolve() async {
     final int ticket = ++_ticket;
-    setState(() {
-      _phase = _GatePhase.loading;
-      _detail = null;
-    });
     try {
+      await PasswordAuthService.instance.waitForPreparation();
+      if (!mounted || ticket != _ticket) return;
+      if (FirebaseAuth.instance.currentUser == null &&
+          _phase == _GatePhase.login) {
+        return;
+      }
+      setState(() {
+        _phase = _GatePhase.loading;
+        _detail = null;
+      });
       await PhoneAuthService.instance.waitForLoginPreparation();
       if (!mounted || ticket != _ticket) return;
       final User? user = FirebaseAuth.instance.currentUser;
       if (user == null) {
+        await HotelCloudSyncService.instance.retainDataForNextLogin();
+        if (!mounted || ticket != _ticket) return;
+        PhoneAuthSession.clear();
+        HotelFirestoreService.instance.clearAccount();
+        HotelDataBuffer.clearSession();
+        BillStore.bills.clear();
+        CustomerStore.customers.clear();
+        ExpenseStore.expenses.clear();
+        await HotelSettingsStore.loadSettings();
+        if (!mounted || ticket != _ticket) return;
         setState(() => _phase = _GatePhase.login);
         return;
       }
@@ -77,8 +96,7 @@ class _CloudGateState extends State<CloudGate> {
         allowCreate: false,
       );
       if (!mounted || ticket != _ticket) return;
-      if (account == null ||
-          HotelFirestoreService.instance.lastError != null) {
+      if (account == null || HotelFirestoreService.instance.lastError != null) {
         setState(() {
           _phase = _GatePhase.failed;
           _detail =
@@ -89,7 +107,9 @@ class _CloudGateState extends State<CloudGate> {
       }
       PhoneAuthSession.businessId = account.businessId;
       try {
-        await HotelOnboardingService.instance.provisionAfterLogin(account.businessId);
+        await HotelOnboardingService.instance.provisionAfterLogin(
+          account.businessId,
+        );
       } catch (error) {
         if (!mounted || ticket != _ticket) return;
         setState(() {
@@ -129,6 +149,10 @@ class _CloudGateState extends State<CloudGate> {
       setState(() => _phase = _GatePhase.ready);
     } catch (error) {
       if (!mounted || ticket != _ticket) return;
+      if (FirebaseAuth.instance.currentUser == null) {
+        setState(() => _phase = _GatePhase.login);
+        return;
+      }
       setState(() {
         _phase = _GatePhase.failed;
         _detail =
@@ -142,63 +166,88 @@ class _CloudGateState extends State<CloudGate> {
     switch (_phase) {
       case _GatePhase.desktop:
         return const _Notice(
-          title: 'Android phone login',
+          title: 'Android login',
           body:
-              'Firebase OTP and cloud sync run on the Android app. This desktop build does not upload local hotel data and does not start a trial.',
+              'Firebase login and cloud sync run on the Android app. This desktop build does not upload local hotel data and does not start a trial.',
         );
       case _GatePhase.login:
-        return const PhoneLoginScreen();
+        return HotelAuthScreen(onReady: () {});
       case _GatePhase.expired:
       case _GatePhase.ready:
         return const RoomDashboard();
       case _GatePhase.failed:
         return _Notice(
-          title: 'Cloud sync failed',
-          body:
-              _detail ??
-              'Cloud hotel could not be read. This is not an empty hotel.',
+          title: 'Could not load your hotel',
+          body: [
+            if (widget.firebaseReady &&
+                FirebaseAuth.instance.currentUser != null)
+              'You are still signed in. Retry to load your saved hotel.',
+            _detail ?? 'Check your connection and try again.',
+          ].join('\n\n'),
           onRetry: widget.firebaseReady ? _resolve : null,
+          onSignOut: widget.firebaseReady
+              ? () async {
+                  await HotelCloudSyncService.instance.retainDataForNextLogin();
+                  await PhoneAuthService.instance.signOutAuthOnly();
+                }
+              : null,
         );
       case _GatePhase.loading:
-        return const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        );
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
   }
 }
 
 class _Notice extends StatelessWidget {
-  const _Notice({required this.title, required this.body, this.onRetry});
+  const _Notice({
+    required this.title,
+    required this.body,
+    this.onRetry,
+    this.onSignOut,
+  });
 
   final String title;
   final String body;
   final Future<void> Function()? onRetry;
+  final Future<void> Function()? onSignOut;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                ),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(body, textAlign: TextAlign.center),
+                  if (onSignOut != null)
+                    CustomButton.text(
+                      onPressed: onSignOut,
+                      child: const Text('Sign out'),
+                    ),
+                  if (onRetry != null) ...[
+                    const SizedBox(height: 24),
+                    CustomButton(
+                      onPressed: onRetry,
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(body, textAlign: TextAlign.center),
-              if (onRetry != null) ...[
-                const SizedBox(height: 24),
-                FilledButton(onPressed: onRetry, child: const Text('Retry')),
-              ],
-            ],
+            ),
           ),
         ),
       ),

@@ -1,8 +1,5 @@
 class CountryDialCode {
-  const CountryDialCode({
-    required this.name,
-    required this.dialCode,
-  });
+  const CountryDialCode({required this.name, required this.dialCode});
 
   final String name;
   final String dialCode;

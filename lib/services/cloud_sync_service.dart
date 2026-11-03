@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'phone_auth_service.dart';
+import 'hotel_data_buffer.dart';
 
 /// Compatibility with existing local keys and read-only PHP migration.
 /// Firestore is the sole live writer. This service never sends PHP PUTs.
@@ -11,10 +9,6 @@ class CloudSyncService {
   static const billKey = 'hotelpro1_bills';
   static const customerKey = 'hotelpro1_customers';
   static const expenseKey = 'hotelpro1_expenses';
-  static const defaultUrl = 'https://2ndhealing.com/api/hotelpro1_store.php';
-  static const defaultApiKey =
-      '80a2d3cdf38216577c3bf7734c05331ab8906cbd7dcfe5ba';
-
   static bool autoSyncPaused = false;
   static Future<void> ensureDefaults() async {}
   static Future<void> markDirty() async {}
@@ -22,7 +16,7 @@ class CloudSyncService {
   static Future<bool> isEnabled() async => false;
   static Future<int> localRevision() async => 0;
   static Future<String?> lastSyncAt() async =>
-      (await SharedPreferences.getInstance()).getString(
+      (await HotelDataBuffer.getInstance()).getString(
         'hotel_firestore_last_sync_at',
       );
   static Future<void> restoreFromCloudIfLocalEmpty() async {}
@@ -37,7 +31,7 @@ class CloudSyncService {
     int conflictRetries = 1,
   }) async => 'Firestore handles hotel sync';
   static Future<bool> isLocalBusinessDataEmpty() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     return [
       roomKey,
       billKey,
@@ -56,108 +50,17 @@ class CloudSyncService {
   }
 
   static Future<void> bindLoginPhoneStore(String phoneNumber) async {
-    await (await SharedPreferences.getInstance()).setString(
+    await (await HotelDataBuffer.getInstance()).setString(
       'hp1_store_id',
       loginStoreId(phoneNumber),
     );
   }
 
-  /// The old API authenticates only a shared app key, so use only the key
-  /// derived internally from the verified phone. PIN stores require an admin
-  /// mapping review; a shared license PIN is not proof of hotel ownership.
+  /// Historical callers must not revive the retired cPanel backend.
   static Future<void> importLegacyForVerifiedOwner() async {
-    final phone = PhoneAuthSession.phoneNumber;
-    if (PhoneAuthSession.uid == null || phone == null) {
-      throw StateError('Verified owner required.');
-    }
-    final prefs = await SharedPreferences.getInstance();
-    // The old PHP store uses a truncated phone hash and a shared API key.
-    // It is not owner-authenticated. Import only after an administrator has
-    // reviewed its full-phone/UID/business mapping; never infer ownership from PIN.
-    if (payloadHasHotelData({
-      for (final key in [roomKey, billKey, customerKey, expenseKey])
-        key: prefs.getString(key) ?? '[]',
-    })) {
-      return;
-    }
-    if (prefs.getBool('hotel_new_owner_${PhoneAuthSession.uid}') == true) {
-      return;
-    }
-    const reviewedLegacyImport = bool.fromEnvironment(
-      'REVIEWED_LEGACY_PHP_IMPORT',
-      defaultValue: false,
+    throw StateError(
+      'The app uses Firebase only. Legacy imports require a separate server migration.',
     );
-    if (!reviewedLegacyImport) {
-      throw StateError(
-        'Legacy PHP hotel requires an approved owner mapping/import. No empty hotel data was uploaded.',
-      );
-    }
-    final marker = 'hotel_php_import_${PhoneAuthSession.uid}';
-    if (prefs.getBool(marker) == true) return;
-    final response = await http
-        .get(
-          Uri.parse(defaultUrl),
-          headers: {
-            'X-Api-Key': defaultApiKey,
-            'X-Store-Id': loginStoreId(phone),
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(const Duration(seconds: 25));
-    if (response.statusCode != 200) {
-      throw StateError(
-        'Legacy hotel lookup failed (${response.statusCode}). Retry; no data was uploaded.',
-      );
-    }
-    final decoded = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
-    if (decoded['ok'] != true) throw StateError('Legacy lookup failed.');
-    final payload = Map<String, dynamic>.from(decoded['data'] as Map);
-    // Keep the original payload before any conversion/migration.
-    await prefs.setString(
-      'hotel_archive_${DateTime.now().microsecondsSinceEpoch}_php',
-      jsonEncode({'ownerUid': PhoneAuthSession.uid, 'data': payload}),
-    );
-    if (payloadHasHotelData(payload)) {
-      final local = {
-        for (final key in [roomKey, billKey, customerKey, expenseKey])
-          key: prefs.getString(key) ?? '[]',
-      };
-      if (payloadHasHotelData(local) &&
-          [
-            roomKey,
-            billKey,
-            customerKey,
-            expenseKey,
-          ].any((key) => local[key] != (payload[key] ?? '[]').toString())) {
-        throw StateError(
-          'Legacy PHP and local records differ. Both copies are preserved; reviewed migration required.',
-        );
-      }
-      for (final key in [roomKey, billKey, customerKey, expenseKey]) {
-        final raw = payload[key];
-        if (raw == null) continue;
-        final value = raw is String ? raw : jsonEncode(raw);
-        if (jsonDecode(value) is! List) {
-          throw FormatException('Legacy $key is not a list.');
-        }
-        await prefs.setString(key, value);
-      }
-      final settings = payload['settings'];
-      if (settings is Map) {
-        for (final entry in settings.entries) {
-          if (!entry.key.toString().startsWith('hotel_')) continue;
-          if (entry.key == 'hotel_gst_tax_rate') {
-            await prefs.setDouble(
-              entry.key.toString(),
-              double.parse(entry.value.toString()),
-            );
-          } else {
-            await prefs.setString(entry.key.toString(), entry.value.toString());
-          }
-        }
-      }
-    }
-    await prefs.setBool(marker, true);
   }
 
   static bool payloadHasHotelData(Map<String, dynamic>? data) {

@@ -1,3 +1,8 @@
+import '../widgets/live_stay_duration.dart';
+import '../widgets/custom_bottom_sheet.dart';
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -37,8 +42,9 @@ Future<void> showBookingViewDialog(
 
   Customer? customer = CustomerStore.findByMobile(guestMobile);
 
-  final String roomAddress =
-      isFuture ? room.futureGuestAddress : room.guestAddress;
+  final String roomAddress = isFuture
+      ? room.futureGuestAddress
+      : room.guestAddress;
   final String guestAddress = roomAddress.trim().isNotEmpty
       ? roomAddress
       : (customer?.address ?? "");
@@ -80,11 +86,6 @@ Future<void> showBookingViewDialog(
     return "$hour:$minute $period";
   }
 
-  String timeToTime(String from, String to) {
-    if (from == "-" || to == "-") return from;
-    return "$from to $to";
-  }
-
   Future<void> openLargePhoto(
     BuildContext dialogContext,
     String title,
@@ -100,10 +101,10 @@ Future<void> showBookingViewDialog(
       return;
     }
 
-    await showDialog(
+    await showCustomBottomSheet(
       context: dialogContext,
       builder: (BuildContext photoContext) {
-        return Dialog(
+        return CustomSheetPanel(
           child: SizedBox(
             width: 750,
             height: 550,
@@ -126,7 +127,7 @@ Future<void> showBookingViewDialog(
                         onPressed: () {
                           Navigator.pop(photoContext);
                         },
-                        icon: const Icon(Icons.close),
+                        icon: const Icon(Icons.close_rounded),
                       ),
                     ],
                   ),
@@ -151,19 +152,35 @@ Future<void> showBookingViewDialog(
 
   Widget bookingDetail(String title, String value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 145,
-            child: Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+      padding: const EdgeInsets.only(bottom: 14),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final label = Text(
+            title,
+            style: const TextStyle(fontSize: 12, color: CustomColors.muted),
+          );
+          final detail = Text(
+            value.isEmpty ? '-' : value,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: CustomColors.text,
             ),
-          ),
-          Expanded(child: Text(value)),
-        ],
+          );
+          if (constraints.maxWidth < 420) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [label, const SizedBox(height: 4), detail],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: 150, child: label),
+              Expanded(child: detail),
+            ],
+          );
+        },
       ),
     );
   }
@@ -179,18 +196,18 @@ Future<void> showBookingViewDialog(
         child: Container(
           height: 150,
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey),
+            border: Border.all(color: CustomColors.muted),
             borderRadius: BorderRadius.circular(10),
           ),
           child: bytes == null
               ? Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.image_not_supported, size: 35),
+                    const Icon(Icons.image_not_supported_rounded, size: 35),
                     const SizedBox(height: 5),
                     Text(title),
                     const Text(
-                      "PHOTO NOT AVAILABLE",
+                      "Photo not available",
                       style: TextStyle(fontSize: 10),
                     ),
                   ],
@@ -207,12 +224,12 @@ Future<void> showBookingViewDialog(
                       child: Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(6),
-                        color: Colors.black54,
+                        color: CustomColors.muted,
                         child: Text(
                           "$title • CLICK TO VIEW",
                           textAlign: TextAlign.center,
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: CustomColors.surface,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                           ),
@@ -226,10 +243,10 @@ Future<void> showBookingViewDialog(
     );
   }
 
-  await showDialog(
+  await showCustomBottomSheet(
     context: context,
     builder: (BuildContext dialogContext) {
-      return AlertDialog(
+      return CustomDialog(
         title: Text(
           isFuture
               ? "Future Booking - Room ${room.roomNumber}"
@@ -246,15 +263,17 @@ Future<void> showBookingViewDialog(
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: isFuture ? Colors.blue.shade50 : Colors.red.shade50,
+                    color: isFuture
+                        ? CustomColors.neutralTint
+                        : CustomColors.bookedTint,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     isFuture ? "● FUTURE BOOKING" : "● CURRENT BOOKING",
                     style: TextStyle(
                       color: isFuture
-                          ? Colors.blue.shade700
-                          : Colors.red.shade700,
+                          ? CustomColors.primary
+                          : CustomColors.error,
                       fontSize: 17,
                       fontWeight: FontWeight.bold,
                     ),
@@ -278,25 +297,57 @@ Future<void> showBookingViewDialog(
 
                 bookingDetail("Room Rent", "₹$bookingRate / Day"),
 
-                bookingDetail("Booking Date", formatDate(bookingDate)),
-
                 bookingDetail(
-                  "Booking Time",
-                  isFuture
-                      ? timeToTime(
-                          formatTime(room.futureBookingDate),
-                          formatTime(room.futureBookingEnd),
-                        )
-                      : timeToTime(
-                          formatTime(room.bookingTime),
-                          formatTime(room.bookingEndTime),
-                        ),
+                  'Check-in date',
+                  formatDate(
+                    isFuture
+                        ? room.futureBookingDate
+                        : room.bookingTime ?? bookingDate,
+                  ),
+                ),
+                bookingDetail(
+                  'Check-in time',
+                  formatTime(
+                    isFuture ? room.futureBookingDate : room.bookingTime,
+                  ),
+                ),
+                bookingDetail(
+                  'Check-out date',
+                  formatDate(
+                    isFuture ? room.futureBookingEnd : room.bookingEndTime,
+                  ),
+                ),
+                bookingDetail(
+                  'Check-out time',
+                  formatTime(
+                    isFuture ? room.futureBookingEnd : room.bookingEndTime,
+                  ),
                 ),
 
                 if (!isFuture)
-                  bookingDetail(
-                    "Stay Duration",
-                    room.stayDurationLabel(),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Stay Duration',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: CustomColors.muted,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        LiveStayDuration(
+                          start: room.bookingTime,
+                          checkout: room.checkoutTime,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
 
                 bookingDetail("Number of Days", bookingDays.toString()),
@@ -332,7 +383,7 @@ Future<void> showBookingViewDialog(
                         : room.extraGuests)
                     .isNotEmpty) ...[
                   const Text(
-                    "ADDITIONAL GUESTS",
+                    "Additional guests",
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
 
@@ -371,7 +422,7 @@ Future<void> showBookingViewDialog(
                           margin: const EdgeInsets.only(bottom: 8),
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade300),
+                            border: Border.all(color: CustomColors.border),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Column(
@@ -401,9 +452,7 @@ Future<void> showBookingViewDialog(
                                   .toString()
                                   .trim()
                                   .isNotEmpty)
-                                Text(
-                                  "Address : ${guest["address"]}",
-                                ),
+                                Text("Address : ${guest["address"]}"),
                               const SizedBox(height: 10),
                               Row(
                                 children: [
@@ -432,22 +481,22 @@ Future<void> showBookingViewDialog(
           ),
         ),
         actions: [
-          TextButton(
+          CustomButton.text(
             autofocus: true,
             onPressed: () {
               Navigator.pop(dialogContext);
             },
-            child: const Text("CLOSE"),
+            child: const Text("Close"),
           ),
-          OutlinedButton.icon(
+          CustomButton.outlineIcon(
             onPressed: () => showBookingSlipPrintView(dialogContext, room),
-            icon: const Icon(Icons.preview),
-            label: const Text("PRINT VIEW"),
+            icon: const Icon(Icons.preview_rounded),
+            label: const Text("Print view"),
           ),
-          ElevatedButton.icon(
+          CustomButton.icon(
             onPressed: () => printBookingSlip(room),
-            icon: const Icon(Icons.print),
-            label: const Text("PRINT"),
+            icon: const Icon(Icons.print_rounded),
+            label: const Text("Print"),
           ),
         ],
       );

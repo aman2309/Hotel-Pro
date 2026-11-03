@@ -1,3 +1,9 @@
+import '../utils/stay_duration.dart' as stay_time;
+import '../widgets/custom_bottom_sheet.dart';
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
+import '../widgets/custom_text_field.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -43,10 +49,7 @@ Future<void> printCustomerId(Customer customer) async {
         ),
         child: pw.Column(
           children: [
-            pw.Text(
-              title,
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-            ),
+            pw.Text(title, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 8),
             pw.Expanded(
               child: image == null
@@ -106,10 +109,7 @@ Future<void> printCustomerId(Customer customer) async {
             pw.SizedBox(height: 10),
             pw.Text(
               "CUSTOMER ID : ${customer.customerId}",
-              style: pw.TextStyle(
-                fontSize: 16,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 8),
             pw.Text("GUEST NAME : ${customer.guestName}"),
@@ -186,47 +186,20 @@ Future<void> showCustomerStayHistoryDialog(
   }
 
   String historyDuration(dynamic bookingValue, dynamic checkoutValue) {
-    if (bookingValue == null || checkoutValue == null) {
-      return "-";
-    }
-
-    try {
-      final DateTime bookingTime = DateTime.parse(bookingValue.toString());
-
-      final DateTime checkoutTime = DateTime.parse(checkoutValue.toString());
-
-      final Duration duration = checkoutTime.difference(bookingTime);
-
-      final int totalMinutes = duration.inMinutes;
-      final int days = totalMinutes ~/ 1440;
-      final int hours = (totalMinutes % 1440) ~/ 60;
-      final int minutes = totalMinutes % 60;
-
-      final List<String> parts = [];
-
-      if (days > 0) {
-        parts.add("$days D");
-      }
-
-      if (hours > 0) {
-        parts.add("$hours H");
-      }
-
-      parts.add("$minutes M");
-
-      return parts.join(" ");
-    } catch (error) {
-      return "-";
-    }
+    if (bookingValue == null || checkoutValue == null) return '-';
+    final start = DateTime.tryParse(bookingValue.toString());
+    final end = DateTime.tryParse(checkoutValue.toString());
+    if (start == null || end == null) return '-';
+    return stay_time.stayDurationLabel(start, checkout: end);
   }
 
-  await showDialog(
+  await showCustomBottomSheet(
     context: context,
     builder: (BuildContext historyContext) {
       final List<Map<String, dynamic>> history = customer.stayHistory.reversed
           .toList();
 
-      return AlertDialog(
+      return CustomDialog(
         title: Text("${customer.customerId} - STAY HISTORY"),
         content: SizedBox(
           width: 720,
@@ -234,7 +207,7 @@ Future<void> showCustomerStayHistoryDialog(
           child: history.isEmpty
               ? const Center(
                   child: Text(
-                    "NO STAY HISTORY AVAILABLE",
+                    "No stay history available",
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 )
@@ -325,12 +298,12 @@ Future<void> showCustomerStayHistoryDialog(
                 ),
         ),
         actions: [
-          TextButton(
+          CustomButton.text(
             autofocus: true,
             onPressed: () {
               Navigator.pop(historyContext);
             },
-            child: const Text("CLOSE"),
+            child: const Text("Close"),
           ),
         ],
       );
@@ -342,25 +315,15 @@ Future<bool?> showEditCustomerDialog(
   BuildContext context,
   Customer customer,
 ) async {
-  final mobileController = TextEditingController(
-    text: customer.mobile,
-  );
+  final mobileController = TextEditingController(text: customer.mobile);
 
-  final nameController = TextEditingController(
-    text: customer.guestName,
-  );
+  final nameController = TextEditingController(text: customer.guestName);
 
-  final idTypeController = TextEditingController(
-    text: customer.idType,
-  );
+  final idTypeController = TextEditingController(text: customer.idType);
 
-  final idController = TextEditingController(
-    text: customer.idNumber,
-  );
+  final idController = TextEditingController(text: customer.idNumber);
 
-  final addressController = TextEditingController(
-    text: customer.address,
-  );
+  final addressController = TextEditingController(text: customer.address);
 
   final mobileFocus = FocusNode();
   final nameFocus = FocusNode();
@@ -378,17 +341,14 @@ Future<bool?> showEditCustomerDialog(
 
   Uint8List? editPhotoBytes(String photoData) => hotelPhotoBytes(photoData);
 
-  final bool? result = await showDialog<bool>(
+  final bool? result = await showCustomBottomSheet<bool>(
     context: context,
     barrierDismissible: false,
     builder: (BuildContext editContext) {
       return StatefulBuilder(
-        builder: (
-          BuildContext dialogContext,
-          StateSetter updateEditForm,
-        ) {
+        builder: (BuildContext dialogContext, StateSetter updateEditForm) {
           Future<ImageSource?> choosePhotoSource() async {
-            return showModalBottomSheet<ImageSource>(
+            return showCustomBottomSheet<ImageSource>(
               context: dialogContext,
               builder: (BuildContext sheetContext) {
                 return SafeArea(
@@ -396,14 +356,14 @@ Future<bool?> showEditCustomerDialog(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ListTile(
-                        leading: const Icon(Icons.camera_alt),
+                        leading: const Icon(Icons.camera_alt_rounded),
                         title: const Text("Camera"),
                         onTap: () {
                           Navigator.pop(sheetContext, ImageSource.camera);
                         },
                       ),
                       ListTile(
-                        leading: const Icon(Icons.photo_library),
+                        leading: const Icon(Icons.photo_library_rounded),
                         title: const Text("Gallery"),
                         onTap: () {
                           Navigator.pop(sheetContext, ImageSource.gallery);
@@ -517,9 +477,7 @@ Future<bool?> showEditCustomerDialog(
             if (idFrontPhoto.isEmpty || idBackPhoto.isEmpty) {
               ScaffoldMessenger.of(editContext).showSnackBar(
                 const SnackBar(
-                  content: Text(
-                    "Please select ID Front and Back Photo",
-                  ),
+                  content: Text("Please select ID Front and Back Photo"),
                 ),
               );
 
@@ -571,9 +529,7 @@ Future<bool?> showEditCustomerDialog(
                     height: 150,
                     width: double.infinity,
                     decoration: BoxDecoration(
-                      border: Border.all(
-                        color: Colors.grey.shade400,
-                      ),
+                      border: Border.all(color: CustomColors.border),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: bytes == null
@@ -583,18 +539,15 @@ Future<bool?> showEditCustomerDialog(
                               textAlign: TextAlign.center,
                             ),
                           )
-                        : Image.memory(
-                            bytes,
-                            fit: BoxFit.contain,
-                          ),
+                        : Image.memory(bytes, fit: BoxFit.contain),
                   ),
                   const SizedBox(height: 6),
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton.icon(
+                    child: CustomButton.outlineIcon(
                       focusNode: focusNode,
                       onPressed: onPressed,
-                      icon: const Icon(Icons.photo_library),
+                      icon: const Icon(Icons.photo_library_rounded),
                       label: Text("CHANGE $title"),
                     ),
                   ),
@@ -603,17 +556,15 @@ Future<bool?> showEditCustomerDialog(
             );
           }
 
-          return AlertDialog(
-            title: Text(
-              "EDIT CUSTOMER - ${customer.customerId}",
-            ),
+          return CustomDialog(
+            title: Text("EDIT CUSTOMER - ${customer.customerId}"),
             content: SizedBox(
               width: 650,
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
+                    CustomTextField(
                       controller: mobileController,
                       focusNode: mobileFocus,
                       autofocus: true,
@@ -628,7 +579,7 @@ Future<bool?> showEditCustomerDialog(
                       },
                     ),
                     const SizedBox(height: 10),
-                    TextField(
+                    CustomTextField(
                       controller: nameController,
                       focusNode: nameFocus,
                       textInputAction: TextInputAction.next,
@@ -641,7 +592,7 @@ Future<bool?> showEditCustomerDialog(
                       },
                     ),
                     const SizedBox(height: 10),
-                    TextField(
+                    CustomTextField(
                       controller: idTypeController,
                       focusNode: idTypeFocus,
                       textInputAction: TextInputAction.next,
@@ -655,7 +606,7 @@ Future<bool?> showEditCustomerDialog(
                       },
                     ),
                     const SizedBox(height: 10),
-                    TextField(
+                    CustomTextField(
                       controller: idController,
                       focusNode: idFocus,
                       textInputAction: TextInputAction.next,
@@ -668,7 +619,7 @@ Future<bool?> showEditCustomerDialog(
                       },
                     ),
                     const SizedBox(height: 10),
-                    TextField(
+                    CustomTextField(
                       controller: addressController,
                       focusNode: addressFocus,
                       minLines: 2,
@@ -705,17 +656,17 @@ Future<bool?> showEditCustomerDialog(
               ),
             ),
             actions: [
-              TextButton(
+              CustomButton.text(
                 onPressed: () {
                   Navigator.pop(editContext, false);
                 },
-                child: const Text("CANCEL"),
+                child: const Text("Cancel"),
               ),
-              ElevatedButton.icon(
+              CustomButton.icon(
                 focusNode: saveFocus,
                 onPressed: saveCustomerChanges,
-                icon: const Icon(Icons.save),
-                label: const Text("SAVE CHANGES"),
+                icon: const Icon(Icons.save_rounded),
+                label: const Text("Save changes"),
               ),
             ],
           );
@@ -745,7 +696,7 @@ Future<void> showCustomerListDialog(BuildContext context) async {
 
   Uint8List? photoBytes(String photoData) => hotelPhotoBytes(photoData);
 
-  await showDialog(
+  await showCustomBottomSheet(
     context: context,
     builder: (BuildContext dialogContext) {
       return StatefulBuilder(
@@ -777,7 +728,7 @@ Future<void> showCustomerListDialog(BuildContext context) async {
               child: Container(
                 height: 120,
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
+                  border: Border.all(color: CustomColors.border),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: bytes == null
@@ -807,19 +758,19 @@ Future<void> showCustomerListDialog(BuildContext context) async {
             );
           }
 
-          return AlertDialog(
-            title: const Text("CUSTOMER LIST / SEARCH"),
+          return CustomDialog(
+            title: const Text("Customer list / search"),
             content: SizedBox(
               width: 850,
               height: 600,
               child: Column(
                 children: [
-                  TextField(
+                  CustomTextField(
                     controller: searchController,
                     autofocus: true,
                     decoration: const InputDecoration(
                       labelText: "Search Customer ID / Mobile / Guest Name",
-                      prefixIcon: Icon(Icons.search),
+                      prefixIcon: Icon(Icons.search_rounded),
                       border: OutlineInputBorder(),
                     ),
                     onChanged: searchCustomer,
@@ -866,9 +817,7 @@ Future<void> showCustomerListDialog(BuildContext context) async {
                                         "${customer.idNumber}",
                                       ),
                                       if (customer.address.isNotEmpty)
-                                        Text(
-                                          "Address : ${customer.address}",
-                                        ),
+                                        Text("Address : ${customer.address}"),
                                       const SizedBox(height: 10),
                                       Row(
                                         children: [
@@ -891,35 +840,39 @@ Future<void> showCustomerListDialog(BuildContext context) async {
                                           Expanded(
                                             child: SizedBox(
                                               height: 64,
-                                              child: ElevatedButton(
+                                              child: CustomButton(
                                                 onPressed: () async {
                                                   final bool? edited =
                                                       await showEditCustomerDialog(
-                                                    dialogContext,
-                                                    customer,
-                                                  );
+                                                        dialogContext,
+                                                        customer,
+                                                      );
 
                                                   if (edited == true) {
                                                     updateDialog(() {
                                                       filteredCustomers =
                                                           List<Customer>.from(
-                                                        CustomerStore.customers,
-                                                      );
+                                                            CustomerStore
+                                                                .customers,
+                                                          );
                                                     });
                                                   }
                                                 },
                                                 style: ElevatedButton.styleFrom(
                                                   padding:
                                                       const EdgeInsets.symmetric(
-                                                    horizontal: 4,
-                                                    vertical: 4,
-                                                  ),
+                                                        horizontal: 4,
+                                                        vertical: 4,
+                                                      ),
                                                 ),
                                                 child: const Column(
                                                   mainAxisAlignment:
                                                       MainAxisAlignment.center,
                                                   children: [
-                                                    Icon(Icons.edit, size: 16),
+                                                    Icon(
+                                                      Icons.edit_rounded,
+                                                      size: 16,
+                                                    ),
                                                     SizedBox(height: 2),
                                                     Text(
                                                       "EDIT\nCUSTOMER",
@@ -942,7 +895,7 @@ Future<void> showCustomerListDialog(BuildContext context) async {
                                           Expanded(
                                             child: SizedBox(
                                               height: 64,
-                                              child: ElevatedButton(
+                                              child: CustomButton(
                                                 onPressed: () async {
                                                   await printCustomerId(
                                                     customer,
@@ -951,16 +904,16 @@ Future<void> showCustomerListDialog(BuildContext context) async {
                                                 style: ElevatedButton.styleFrom(
                                                   padding:
                                                       const EdgeInsets.symmetric(
-                                                    horizontal: 4,
-                                                    vertical: 4,
-                                                  ),
+                                                        horizontal: 4,
+                                                        vertical: 4,
+                                                      ),
                                                 ),
                                                 child: const Column(
                                                   mainAxisAlignment:
                                                       MainAxisAlignment.center,
                                                   children: [
                                                     Icon(
-                                                      Icons.print,
+                                                      Icons.print_rounded,
                                                       size: 16,
                                                     ),
                                                     SizedBox(height: 2),
@@ -985,7 +938,7 @@ Future<void> showCustomerListDialog(BuildContext context) async {
                                           Expanded(
                                             child: SizedBox(
                                               height: 64,
-                                              child: ElevatedButton(
+                                              child: CustomButton(
                                                 onPressed: () async {
                                                   await showCustomerStayHistoryDialog(
                                                     dialogContext,
@@ -995,16 +948,16 @@ Future<void> showCustomerListDialog(BuildContext context) async {
                                                 style: ElevatedButton.styleFrom(
                                                   padding:
                                                       const EdgeInsets.symmetric(
-                                                    horizontal: 4,
-                                                    vertical: 4,
-                                                  ),
+                                                        horizontal: 4,
+                                                        vertical: 4,
+                                                      ),
                                                 ),
                                                 child: Column(
                                                   mainAxisAlignment:
                                                       MainAxisAlignment.center,
                                                   children: [
                                                     const Icon(
-                                                      Icons.history,
+                                                      Icons.history_rounded,
                                                       size: 16,
                                                     ),
                                                     const SizedBox(height: 2),
@@ -1038,12 +991,12 @@ Future<void> showCustomerListDialog(BuildContext context) async {
               ),
             ),
             actions: [
-              TextButton(
+              CustomButton.text(
                 autofocus: true,
                 onPressed: () {
                   Navigator.pop(dialogContext);
                 },
-                child: const Text("CLOSE"),
+                child: const Text("Close"),
               ),
             ],
           );

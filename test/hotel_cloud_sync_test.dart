@@ -104,17 +104,11 @@ void main() {
 
   test('conflict keeps newer cloud record', () {
     expect(
-      policy.localWinsConflict(
-        localUpdatedAtMs: 100,
-        cloudUpdatedAtMs: 200,
-      ),
+      policy.localWinsConflict(localUpdatedAtMs: 100, cloudUpdatedAtMs: 200),
       isFalse,
     );
     expect(
-      policy.localWinsConflict(
-        localUpdatedAtMs: 300,
-        cloudUpdatedAtMs: 200,
-      ),
+      policy.localWinsConflict(localUpdatedAtMs: 300, cloudUpdatedAtMs: 200),
       isTrue,
     );
   });
@@ -126,7 +120,10 @@ void main() {
       normalRent: 1500,
       status: 'EMPTY',
     );
-    final HotelCloudCodec codec = HotelCloudCodec(deviceId: 'devA', updatedAtMs: 1);
+    final HotelCloudCodec codec = HotelCloudCodec(
+      deviceId: 'devA',
+      updatedAtMs: 1,
+    );
     final HotelCloudSnapshot first = codec.build(
       rooms: <Room>[room],
       bills: const <BillRecord>[],
@@ -194,22 +191,22 @@ void main() {
       balance: 2300,
       paymentMode: 'UPI',
     );
-    final HotelCloudSnapshot snap = HotelCloudCodec(deviceId: 'devA', updatedAtMs: 5)
-        .build(
-      rooms: <Room>[booked],
-      bills: <BillRecord>[bill],
-      guests: <Customer>[
-        Customer(
-          customerId: 'CUST-0001',
-          mobile: '9999999999',
-          guestName: 'Rahul',
-          idType: 'Aadhaar',
-          idNumber: '1234',
-        ),
-      ],
-      expenses: const <Map<String, dynamic>>[],
-      settings: <String, dynamic>{'hotel_name': 'Park'},
-    );
+    final HotelCloudSnapshot snap =
+        HotelCloudCodec(deviceId: 'devA', updatedAtMs: 5).build(
+          rooms: <Room>[booked],
+          bills: <BillRecord>[bill],
+          guests: <Customer>[
+            Customer(
+              customerId: 'CUST-0001',
+              mobile: '9999999999',
+              guestName: 'Rahul',
+              idType: 'Aadhaar',
+              idNumber: '1234',
+            ),
+          ],
+          expenses: const <Map<String, dynamic>>[],
+          settings: <String, dynamic>{'hotel_name': 'Park'},
+        );
     expect(snap.idsByCollection['bookings'], contains('bkg_room_101'));
     expect(snap.idsByCollection['bookings'], contains('bkg_BILL-000001'));
     expect(snap.idsByCollection['bills'], contains('BILL-000001'));
@@ -241,17 +238,19 @@ void main() {
       futureDays: 1,
       futureBookingDate: DateTime(2026, 10, 1),
     );
-    final HotelCloudSnapshot snap = HotelCloudCodec(deviceId: 'devA', updatedAtMs: 9)
-        .build(
-      rooms: <Room>[closed, cleaning, future],
-      bills: const <BillRecord>[],
-      guests: const <Customer>[],
-      expenses: const <Map<String, dynamic>>[],
-      settings: <String, dynamic>{'hotel_name': 'Park'},
-    );
+    final HotelCloudSnapshot snap =
+        HotelCloudCodec(deviceId: 'devA', updatedAtMs: 9).build(
+          rooms: <Room>[closed, cleaning, future],
+          bills: const <BillRecord>[],
+          guests: const <Customer>[],
+          expenses: const <Map<String, dynamic>>[],
+          settings: <String, dynamic>{'hotel_name': 'Park'},
+        );
     expect(snap.idsByCollection['closedRooms'], contains('closed_102'));
     expect(
-      snap.docs.firstWhere((HotelCloudDoc doc) => doc.id == 'room_103').data['status'],
+      snap.docs
+          .firstWhere((HotelCloudDoc doc) => doc.id == 'room_103')
+          .data['status'],
       'CLEANING',
     );
     expect(snap.idsByCollection['futureBookings'], contains('fb_room_104'));
@@ -277,7 +276,10 @@ void main() {
       idFrontPhotoPath: fakePhoto,
       idBackPhotoPath: fakePhoto,
     );
-    final HotelCloudCodec codec = HotelCloudCodec(deviceId: 'devA', updatedAtMs: 11);
+    final HotelCloudCodec codec = HotelCloudCodec(
+      deviceId: 'devA',
+      updatedAtMs: 11,
+    );
     final HotelCloudSnapshot snap = codec.build(
       rooms: const <Room>[],
       bills: const <BillRecord>[],
@@ -309,28 +311,26 @@ void main() {
   });
 
   test('room json num fields still produce a valid room_{id} document', () {
-    final List<Room> rooms = HotelCloudCodec.decodeRoomList(
-      <dynamic>[
-        <String, dynamic>{
-          'roomNumber': 205.0,
-          'roomName': 'Oak',
-          'roomType': 'Deluxe',
-          'normalRent': 1800.0,
-          'status': 'EMPTY',
-        },
-        <String, dynamic>{'bad': true},
-      ],
-    );
+    final List<Room> rooms = HotelCloudCodec.decodeRoomList(<dynamic>[
+      <String, dynamic>{
+        'roomNumber': 205.0,
+        'roomName': 'Oak',
+        'roomType': 'Deluxe',
+        'normalRent': 1800.0,
+        'status': 'EMPTY',
+      },
+      <String, dynamic>{'bad': true},
+    ]);
     expect(rooms.length, 1);
     expect(HotelCloudCodec.roomId(rooms.first.roomNumber), 'room_205');
-    final HotelCloudSnapshot snap = HotelCloudCodec(deviceId: 'devA', updatedAtMs: 1)
-        .build(
-      rooms: rooms,
-      bills: const <BillRecord>[],
-      guests: const <Customer>[],
-      expenses: const <Map<String, dynamic>>[],
-      settings: <String, dynamic>{'hotel_name': 'Park'},
-    );
+    final HotelCloudSnapshot snap =
+        HotelCloudCodec(deviceId: 'devA', updatedAtMs: 1).build(
+          rooms: rooms,
+          bills: const <BillRecord>[],
+          guests: const <Customer>[],
+          expenses: const <Map<String, dynamic>>[],
+          settings: <String, dynamic>{'hotel_name': 'Park'},
+        );
     expect(snap.idsByCollection['rooms'], contains('room_205'));
     final Map<String, dynamic> safe = HotelCloudCodec.firestoreSafeMap(
       snap.docs.firstWhere((HotelCloudDoc doc) => doc.id == 'room_205').data,
@@ -340,30 +340,30 @@ void main() {
   });
 
   test('cloud restore guests keep empty photo strings for Storage fill', () {
-    final HotelCloudCodec codec = HotelCloudCodec(deviceId: 'devA', updatedAtMs: 1);
-    final List<Customer> guests = codec.guestsFromCloud(
-      <Map<String, dynamic>>[
-        <String, dynamic>{
-          'customerId': 'CUST-0001',
-          'mobile': '9999999999',
-          'guestName': 'Rahul',
-          'idType': 'Aadhaar',
-          'idNumber': '1234',
-          'hasFrontPhoto': true,
-          'idFrontStoragePath':
-              'businesses/biz_x/guests/CUST-0001/id_front.jpg',
-          'idFrontPhotoPath': <String, dynamic>{
-            'hasPhoto': true,
-            'storageEnabled': true,
-            'storagePath': 'businesses/biz_x/guests/CUST-0001/id_front.jpg',
-          },
-          'idBackPhotoPath': <String, dynamic>{
-            'hasPhoto': true,
-            'storageEnabled': true,
-          },
-        },
-      ],
+    final HotelCloudCodec codec = HotelCloudCodec(
+      deviceId: 'devA',
+      updatedAtMs: 1,
     );
+    final List<Customer> guests = codec.guestsFromCloud(<Map<String, dynamic>>[
+      <String, dynamic>{
+        'customerId': 'CUST-0001',
+        'mobile': '9999999999',
+        'guestName': 'Rahul',
+        'idType': 'Aadhaar',
+        'idNumber': '1234',
+        'hasFrontPhoto': true,
+        'idFrontStoragePath': 'businesses/biz_x/guests/CUST-0001/id_front.jpg',
+        'idFrontPhotoPath': <String, dynamic>{
+          'hasPhoto': true,
+          'storageEnabled': true,
+          'storagePath': 'businesses/biz_x/guests/CUST-0001/id_front.jpg',
+        },
+        'idBackPhotoPath': <String, dynamic>{
+          'hasPhoto': true,
+          'storageEnabled': true,
+        },
+      },
+    ]);
     expect(guests, hasLength(1));
     expect(guests.first.idFrontPhotoPath, isEmpty);
     expect(guests.first.idBackPhotoPath, isEmpty);
@@ -371,23 +371,24 @@ void main() {
   });
 
   test('cloud restore merges live booking and future booking onto rooms', () {
-    final HotelCloudCodec codec = HotelCloudCodec(deviceId: 'devA', updatedAtMs: 1);
-    final List<Room> rooms = codec.roomsFromCloud(
-      <Map<String, dynamic>>[
-        <String, dynamic>{
-          'roomNumber': 101,
-          'roomType': 'Deluxe',
-          'normalRent': 1500,
-          'status': 'EMPTY',
-        },
-        <String, dynamic>{
-          'roomNumber': 104,
-          'roomType': 'Luxury',
-          'normalRent': 2000,
-          'status': 'EMPTY',
-        },
-      ],
+    final HotelCloudCodec codec = HotelCloudCodec(
+      deviceId: 'devA',
+      updatedAtMs: 1,
     );
+    final List<Room> rooms = codec.roomsFromCloud(<Map<String, dynamic>>[
+      <String, dynamic>{
+        'roomNumber': 101,
+        'roomType': 'Deluxe',
+        'normalRent': 1500,
+        'status': 'EMPTY',
+      },
+      <String, dynamic>{
+        'roomNumber': 104,
+        'roomType': 'Luxury',
+        'normalRent': 2000,
+        'status': 'EMPTY',
+      },
+    ]);
     codec.mergeRelatedIntoRooms(
       rooms: rooms,
       bookings: <Map<String, dynamic>>[
@@ -458,8 +459,7 @@ void main() {
       cloud: <String, dynamic>{
         'hasFrontPhoto': true,
         'hasBackPhoto': true,
-        'idFrontStoragePath':
-            'businesses/biz_x/guests/CUST-0001/id_front.jpg',
+        'idFrontStoragePath': 'businesses/biz_x/guests/CUST-0001/id_front.jpg',
         'idBackStoragePath': 'businesses/biz_x/guests/CUST-0001/id_back.jpg',
         'idFrontSha256': 'abc',
         'idBackSha256': 'def',
@@ -503,34 +503,37 @@ void main() {
     expect(PhoneAuthSession.businessId, 'biz_xehC63jAFQWvlgKRwabV');
   });
 
-  test('missing SHA client identifier is explained without disabling verification', () {
-    expect(
-      PhoneAuthService.humanize(
-        FirebaseAuthException(
-          code: 'missing-client-identifier',
-          message: 'App identifier missing',
+  test(
+    'missing SHA client identifier is explained without disabling verification',
+    () {
+      expect(
+        PhoneAuthService.humanize(
+          FirebaseAuthException(
+            code: 'missing-client-identifier',
+            message: 'App identifier missing',
+          ),
         ),
-      ),
-      contains('SHA-256'),
-    );
-    expect(
-      PhoneAuthService.humanize(
-        FirebaseAuthException(
-          code: 'unknown',
-          message:
-              'A play_integrity_token was passed, but no matching SHA-256 was registered',
+        contains('setup is incomplete'),
+      );
+      expect(
+        PhoneAuthService.humanize(
+          FirebaseAuthException(
+            code: 'unknown',
+            message:
+                'A play_integrity_token was passed, but no matching SHA-256 was registered',
+          ),
         ),
-      ),
-      contains('Send OTP again'),
-    );
-    expect(
-      PhoneAuthService.humanize(
-        FirebaseAuthException(
-          code: 'captcha-check-failed',
-          message: 'captcha',
+        contains('contact support'),
+      );
+      expect(
+        PhoneAuthService.humanize(
+          FirebaseAuthException(
+            code: 'captcha-check-failed',
+            message: 'captcha',
+          ),
         ),
-      ),
-      contains('Phone verification check failed'),
-    );
-  });
+        contains('Phone verification check failed'),
+      );
+    },
+  );
 }

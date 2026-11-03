@@ -1,15 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'hotel_firestore_service.dart';
 import 'hotel_license_policy.dart';
-import '../config/backend_config.dart';
-import 'cpanel_sync_service.dart';
-import 'hotel_pin_client.dart';
+import 'hotel_license_client.dart';
 import 'phone_auth_service.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'hotel_data_buffer.dart';
 
-/// 10-day trial + 8-digit store PIN for Hotel Pro 1.
+/// Firebase-managed trial and month/year license keys for Hotel Pro.
 class LicenseService extends ChangeNotifier {
   LicenseService._();
   static final LicenseService instance = LicenseService._();
@@ -72,9 +70,11 @@ class LicenseService extends ChangeNotifier {
       return 'License could not be read. Retry.';
     }
     if (activated && expiresAt != null) {
-      return 'License ${formatLicenseDate(expiresAt!)} tak. ${formatLicenseRemaining(remaining)}. Renew with PIN';
+      return 'License ${formatLicenseDate(expiresAt!)} tak. ${formatLicenseRemaining(remaining)}. Renew with a license key';
     }
-    if (expired) return 'License khatam. Renew with PIN. Purana data safe hai.';
+    if (expired) {
+      return 'License khatam. Renew with a license key. Purana data safe hai.';
+    }
     if (trialStart == null) return 'Trial shuru nahi hui';
     return 'Trial ${formatLicenseRemaining(remaining)}';
   }
@@ -113,7 +113,7 @@ class LicenseService extends ChangeNotifier {
 
   Future<void> init() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await HotelDataBuffer.getInstance();
       activated = prefs.getBool(_kOn) ?? false;
       pinHash = prefs.getString(_kPinHash);
       final startRaw = prefs.getString(_kStart);
@@ -138,10 +138,6 @@ class LicenseService extends ChangeNotifier {
 
   /// Server read only. Does not create or restart a trial.
   Future<void> readCloudLicense(String businessId) async {
-    if (hotelUsesCpanel) {
-      await CpanelSyncService.instance.pull();
-      return;
-    }
     try {
       final snap = await HotelFirestoreService.instance
           .col(businessId, 'settings')
@@ -153,10 +149,15 @@ class LicenseService extends ChangeNotifier {
       final expiry = data?['expiresAt'];
       final DateTime? cloudStart = start is Timestamp ? start.toDate() : null;
       final DateTime? cloudTrialEnd = end is Timestamp ? end.toDate() : null;
-      final DateTime? cloudExpiry = expiry is Timestamp ? expiry.toDate() : null;
+      final DateTime? cloudExpiry = expiry is Timestamp
+          ? expiry.toDate()
+          : null;
       final bool cloudActivated =
           data?['activated'] == true &&
-          data?['issuer'] == 'hotelpro-license-server-v1';
+          const [
+            'hotelpro-license-server-v1',
+            'hotelpro-license-server-v2',
+          ].contains(data?['issuer']);
       final HotelLicenseAssessment assessment = assessHotelLicense(
         readFailed: false,
         documentExists: snap.exists,
@@ -201,7 +202,7 @@ class LicenseService extends ChangeNotifier {
 
   /// One permanent trial/activation record per verified business.
   Future<void> bindBusiness(String businessId) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
     final ref = HotelFirestoreService.instance
         .col(businessId, 'settings')
         .doc('license');
@@ -251,7 +252,10 @@ class LicenseService extends ChangeNotifier {
     trialStart = cloudStart;
     activated =
         persisted['activated'] == true &&
-        persisted['issuer'] == 'hotelpro-license-server-v1' &&
+        const [
+          'hotelpro-license-server-v1',
+          'hotelpro-license-server-v2',
+        ].contains(persisted['issuer']) &&
         persisted['expiresAt'] is Timestamp &&
         (persisted['expiresAt'] as Timestamp).toDate().isAfter(DateTime.now());
     pinHash = activated ? persisted['pinHash'] as String? : null;
@@ -263,37 +267,29 @@ class LicenseService extends ChangeNotifier {
   }
 
   Future<bool> redeem(String rawPin) async {
-    if (hotelUsesCpanel) {
-      final pin = asciiDigits(rawPin);
-      if (pin.length != 8) {
-        lastError = '8 digit PIN daalein';
-        notifyListeners();
-        return false;
-      }
-      return CpanelSyncService.instance.redeem(pin);
-    }
     lastError = null;
-    var pin = asciiDigits(rawPin);
-    if (pin.length > 8) pin = pin.substring(0, 8);
-    if (pin.length != 8) {
-      lastError = '8 digit PIN daalein';
+    final key = rawPin.toUpperCase().replaceAll(RegExp(r'[\s-]'), '');
+    if (!RegExp(r'^HP[A-F0-9]{32}$').hasMatch(key)) {
+      lastError = 'Enter a valid Hotel Pro license key (HP-…).';
       notifyListeners();
       return false;
     }
     if (cloudView == HotelLicenseView.unreadable) {
-      lastError = 'License read ke bina PIN activate nahi hoga.';
+      lastError = 'License read ke bina key activate nahi hoga.';
       notifyListeners();
       return false;
     }
     final String? businessId =
-        PhoneAuthSession.businessId ?? HotelFirestoreService.instance.businessId;
+        PhoneAuthSession.businessId ??
+        HotelFirestoreService.instance.businessId;
     if (businessId == null || businessId.isEmpty) {
-      lastError = 'Hotel mapping missing. PIN se naya hotel nahi banta.';
+      lastError = 'Hotel mapping missing. Key se naya hotel nahi banta.';
       notifyListeners();
       return false;
     }
     try {
-      final Map<String, dynamic> result = await HotelPinClient.instance.redeem(pin);
+      final Map<String, dynamic> result = await HotelLicenseClient.instance
+          .redeem(key);
       if (result['activated'] != true || result['businessId'] != businessId) {
         lastError = 'Activation unsuccessful. Try later or contact the seller.';
         notifyListeners();
@@ -304,10 +300,10 @@ class LicenseService extends ChangeNotifier {
     } on FirebaseFunctionsException catch (error) {
       lastError = error.code == 'resource-exhausted'
           ? 'Bahut attempts. Thodi der baad try karein.'
-          : 'Activation unsuccessful. Try later or contact the seller.';
+          : (error.message ??
+                'Key activate nahi hui. Contact your administrator.');
       notifyListeners();
       return false;
     }
   }
-
 }

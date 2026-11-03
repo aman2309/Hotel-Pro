@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/hotel_data_buffer.dart';
 
 import '../models/customer.dart';
 import '../services/hotel_record_ids.dart';
@@ -15,7 +15,7 @@ class CustomerStore {
   static const String _customerKey = CloudSyncService.customerKey;
 
   static Future<void> loadCustomers() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
 
     final String? savedData = prefs.getString(_customerKey);
 
@@ -182,7 +182,7 @@ class CustomerStore {
   }
 
   static Future<void> _saveCustomersToDisk() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
 
     final List<Map<String, dynamic>> customerList = customers.map((
       Customer customer,

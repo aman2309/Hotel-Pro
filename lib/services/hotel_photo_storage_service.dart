@@ -8,7 +8,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'hotel_data_buffer.dart';
+import 'serial_work_queue.dart';
 
 import '../models/customer.dart';
 import '../models/room.dart';
@@ -45,7 +46,7 @@ Uint8List compressHotelIdPhoto(Uint8List bytes) {
   return out.length <= HotelPhotoRef.maxBytes ? out : bytes;
 }
 
-/// Firebase Storage backup for guest ID photos. Local Base64 stays primary.
+/// Firebase Storage for ID photos; selected bytes and retry jobs live in RAM only.
 class HotelPhotoStorageService extends ChangeNotifier {
   HotelPhotoStorageService._();
 
@@ -56,12 +57,17 @@ class HotelPhotoStorageService extends ChangeNotifier {
   static const String _indexKey = 'hotel_storage_photo_index_v3';
   static const Duration _timeout = Duration(seconds: 40);
 
+  final _queueWork = SerialWorkQueue();
   Future<void>? _flushFuture;
   Timer? _retryTimer;
   bool restoring = false;
   bool hasRestoreFailures = false;
   int pendingUploadCount = 0;
   String? lastPhotoError;
+  // Download failures for an older guest must not reject a new booking.
+  String? lastUploadError;
+  bool get hasPendingUploadFailure =>
+      pendingUploadCount > 0 || lastUploadError != null;
   Future<void>? _syncFuture;
   Future<void>? _enqueueFuture;
   Map<String, String> _photoHeads = <String, String>{};
@@ -85,7 +91,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
       (job) =>
           job['storagePath'].toString().startsWith('businesses/$businessId/'),
     );
-    await (await SharedPreferences.getInstance()).setString(
+    await (await HotelDataBuffer.getInstance()).setString(
       _queueKey,
       jsonEncode(queue),
     );
@@ -142,6 +148,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
     _syncFuture = done.future;
     try {
       if (!HotelCloudSyncService.instance.bootstrapped ||
+          HotelCloudSyncService.instance.hasActiveEdit ||
           await HotelCloudSyncService.instance.hasPendingChanges) {
         return;
       }
@@ -174,14 +181,18 @@ class HotelPhotoStorageService extends ChangeNotifier {
       );
       return;
     }
-    final capture = _enqueueFromLocal();
-    _enqueueFuture = capture;
-    try {
-      await capture;
-    } finally {
-      _enqueueFuture = null;
-    }
+    await capturePendingPhotos();
     await flushQueue(reason: reason);
+  }
+
+  /// Capture bytes before committing records or allowing a remote restore.
+  /// Enqueue and flush share the lock, so a running upload cannot drop new jobs.
+  Future<void> capturePendingPhotos() {
+    final capture = _queueWork.run(_enqueueFromLocal);
+    _enqueueFuture = capture;
+    return capture.whenComplete(() {
+      if (identical(_enqueueFuture, capture)) _enqueueFuture = null;
+    });
   }
 
   void _logAuthAndBucket() {
@@ -214,7 +225,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
   Future<void> flushQueue({String reason = 'flush'}) {
     return _flushFuture ??= () async {
       try {
-        await _flushLocked(reason: reason);
+        await _queueWork.run(() => _flushLocked(reason: reason));
       } finally {
         _flushFuture = null;
       }
@@ -236,7 +247,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
       return;
     }
     await _loadIndex();
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
     final List<Map<String, dynamic>> queue = await _readQueue();
 
     void offer(Map<String, dynamic> job) {
@@ -337,6 +348,13 @@ class HotelPhotoStorageService extends ChangeNotifier {
     }
 
     await prefs.setString(_queueKey, jsonEncode(queue));
+    pendingUploadCount = queue
+        .where(
+          (job) => job['storagePath'].toString().startsWith(
+            'businesses/$businessId/',
+          ),
+        )
+        .length;
     HotelPhotoUploadDebug.stage(
       '15 Pending/retry queue state',
       <String, Object?>{
@@ -464,6 +482,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
   }
 
   Future<void> _flushLocked({required String reason}) async {
+    lastUploadError = null;
     HotelPhotoUploadDebug.stage(
       '7 HotelPhotoStorageService upload method called',
       <String, Object?>{
@@ -489,7 +508,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
       return;
     }
     await _loadIndex();
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
     final List<Map<String, dynamic>> queue = await _readQueue();
     if (queue.isEmpty) {
       HotelPhotoUploadDebug.stage(
@@ -677,6 +696,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
         );
         _logError('Upload failed $path try=$retries: $error', stack);
         lastPhotoError = error.toString();
+        lastUploadError = error.toString();
         remaining.add(job);
       } catch (error, stack) {
         final int retries = ((job['retries'] as num?)?.toInt() ?? 0) + 1;
@@ -700,6 +720,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
         );
         _logError('Upload failed $path try=$retries: $error', stack);
         lastPhotoError = error.toString();
+        lastUploadError = error.toString();
         remaining.add(job);
       }
     }
@@ -856,7 +877,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
     hasRestoreFailures = false;
     try {
       await _loadIndex();
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
       final List<Customer> guests = _decodeGuests(
         prefs.getString(CloudSyncService.customerKey),
       );
@@ -1222,7 +1243,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
     if (_indexLoaded) {
       return;
     }
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
     _photoHeads = Map<String, String>.from(
       jsonDecode(prefs.getString('hotel_storage_heads_v4') ?? '{}') as Map,
     );
@@ -1241,7 +1262,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
   }
 
   Future<void> _writeIndex() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
     await prefs.setString(_indexKey, jsonEncode(_pathIndex));
     await prefs.setString('hotel_storage_heads_v4', jsonEncode(_photoHeads));
   }
@@ -1258,7 +1279,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
               .startsWith('businesses/$businessId/'),
         )
         .toList();
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
     await prefs.setString(_queueKey, jsonEncode(kept));
     pendingUploadCount = kept.length;
     notifyListeners();
@@ -1277,10 +1298,9 @@ class HotelPhotoStorageService extends ChangeNotifier {
       'at': DateTime.now().toIso8601String(),
     };
     mismatchNotes.add(note);
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    final List<dynamic> existing = jsonDecode(
-      prefs.getString(_mismatchKey) ?? '[]',
-    ) as List<dynamic>;
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
+    final List<dynamic> existing =
+        jsonDecode(prefs.getString(_mismatchKey) ?? '[]') as List<dynamic>;
     existing.add(note);
     await prefs.setString(_mismatchKey, jsonEncode(existing));
     lastPhotoError =
@@ -1329,13 +1349,14 @@ class HotelPhotoStorageService extends ChangeNotifier {
         return PhotoUploadChoice.uploadNew;
       }
       lastPhotoError = 'Photo read failed. Original was not replaced.';
+      lastUploadError = error.toString();
       notifyListeners();
       return PhotoUploadChoice.retryRead;
     }
   }
 
   Future<List<Map<String, dynamic>>> _readQueue() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
     final String raw = prefs.getString(_queueKey) ?? '[]';
     try {
       final List<dynamic> decoded = jsonDecode(raw) as List<dynamic>;

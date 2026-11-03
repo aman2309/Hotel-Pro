@@ -4,7 +4,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
 
 import '../app_navigator.dart';
-import 'cloud_sync_service.dart';
+import '../stores/hotel_settings_store.dart';
+import 'hotel_data_buffer.dart';
 import 'hotel_firestore_service.dart';
 import 'otp_request_gate.dart';
 
@@ -46,13 +47,25 @@ class PhoneCodeSent {
 }
 
 class PhoneAuthService {
-  PhoneAuthService._();
+  PhoneAuthService({
+    FirebaseAuth? auth,
+    OtpRequestGate? otpGate,
+    this.firebaseReady,
+  }) : _authOverride = auth,
+       _otpGate = otpGate ?? OtpRequestGate();
 
-  static final PhoneAuthService instance = PhoneAuthService._();
+  static final PhoneAuthService instance = PhoneAuthService();
 
   static const Duration otpTimeout = Duration(seconds: 60);
-  final _otpGate = OtpRequestGate();
+  final FirebaseAuth? _authOverride;
+  final OtpRequestGate _otpGate;
+  final bool Function()? firebaseReady;
+  FirebaseAuth get _auth => _authOverride ?? FirebaseAuth.instance;
+  bool get _isFirebaseReady =>
+      firebaseReady?.call() ?? Firebase.apps.isNotEmpty;
+  int _otpRequestGeneration = 0;
   Future<PhoneAuthOutcome>? _signInFuture;
+  Map<String, String>? signupDraft;
 
   /// Auth emits its user before the first-login mapping transaction finishes.
   /// Bootstrap must wait for that verified new-owner decision, not race it.
@@ -66,12 +79,16 @@ class PhoneAuthService {
     debugPrint(
       '[PHONE_AUTH] signOut auth-only; hotel prefs and businessId cache kept',
     );
+    _otpRequestGeneration++;
+    _otpGate.finish();
     PhoneAuthSession.clear();
+    signupDraft = null;
+    if (HotelDataBuffer.cloudOnly) HotelDataBuffer.clearSession();
     HotelFirestoreService.instance.clearAccount();
-    if (Firebase.apps.isEmpty) {
+    if (!_isFirebaseReady) {
       return;
     }
-    await FirebaseAuth.instance.signOut();
+    await _auth.signOut();
   }
 
   Future<void> sendOtp({
@@ -81,43 +98,63 @@ class PhoneAuthService {
     required void Function(PhoneAuthOutcome outcome) onAutoVerified,
     required void Function(String message) onError,
     void Function(String verificationId)? onAutoRetrievalTimeout,
-    bool forceRecaptcha = false,
   }) async {
+    if (_signInFuture != null) {
+      onError('Phone verification is completing. Please wait.');
+      return;
+    }
     try {
       await _otpGate.begin(e164Phone);
     } catch (error) {
       onError(humanize(error));
       return;
     }
+    final generation = ++_otpRequestGeneration;
+    var terminal = false;
+    var codeIssued = false;
     Timer? watchdog;
+    bool isCurrent() => generation == _otpRequestGeneration && !terminal;
     void finish() {
       watchdog?.cancel();
-      _otpGate.finish();
+      if (generation == _otpRequestGeneration) _otpGate.finish();
+    }
+
+    void fail(String message) {
+      if (!isCurrent() || codeIssued) return;
+      terminal = true;
+      finish();
+      onError(message);
     }
 
     watchdog = Timer(const Duration(minutes: 2), () {
-      finish();
-      onError('OTP request timed out. Check internet and try again later.');
+      fail(
+        'Verification timed out. Close any verification window before trying again.',
+      );
     });
     await _sendOtp(
       e164Phone: e164Phone,
       forceResendingToken: forceResendingToken,
-      forceRecaptcha: forceRecaptcha,
+      isCurrent: isCurrent,
       onCodeSent: (sent) {
+        if (!isCurrent() || codeIssued) return;
+        codeIssued = true;
         finish();
         onCodeSent(sent);
       },
       onAutoVerified: (outcome) {
+        if (!isCurrent()) return;
+        terminal = true;
         finish();
         onAutoVerified(outcome);
       },
-      onError: (message) {
-        finish();
-        onError(message);
-      },
+      onError: fail,
       onAutoRetrievalTimeout: (id) {
-        finish();
-        onAutoRetrievalTimeout?.call(id);
+        if (!isCurrent()) return;
+        if (!codeIssued) {
+          fail('SMS verification timed out. Please try again.');
+        } else {
+          onAutoRetrievalTimeout?.call(id);
+        }
       },
     );
   }
@@ -129,29 +166,27 @@ class PhoneAuthService {
     required void Function(PhoneAuthOutcome outcome) onAutoVerified,
     required void Function(String message) onError,
     void Function(String verificationId)? onAutoRetrievalTimeout,
-    bool forceRecaptcha = false,
+    required bool Function() isCurrent,
   }) async {
     try {
-      if (Firebase.apps.isEmpty) {
+      if (!_isFirebaseReady) {
         onError('Firebase is not ready on this device.');
         return;
       }
-      // Play Store builds use Google's app-signing SHA-256. If that fingerprint
-      // is missing in Firebase, Play Integrity fails; retry via reCAPTCHA.
-      await FirebaseAuth.instance.setSettings(
+      // Let Firebase choose native Play Integrity/reCAPTCHA. Starting another
+      // request from verificationFailed races the SDK's existing browser flow.
+      await _auth.setSettings(
         appVerificationDisabledForTesting: false,
-        forceRecaptchaFlow: forceRecaptcha,
+        forceRecaptchaFlow: false,
       );
-      debugPrint(
-        '[PHONE_AUTH] appVerification disabled=false '
-        'forceRecaptcha=$forceRecaptcha',
-      );
+      debugPrint('[PHONE_AUTH] native app verification enabled');
       debugPrint('[PHONE_AUTH] sending OTP');
-      await FirebaseAuth.instance.verifyPhoneNumber(
+      await _auth.verifyPhoneNumber(
         phoneNumber: e164Phone,
         timeout: otpTimeout,
         forceResendingToken: forceResendingToken,
         verificationCompleted: (PhoneAuthCredential credential) async {
+          if (!isCurrent()) return;
           debugPrint('[PHONE_AUTH] auto-verification completed (native SMS)');
           try {
             final PhoneAuthOutcome outcome = await _signIn(credential);
@@ -160,29 +195,19 @@ class PhoneAuthService {
             onError(humanize(error));
           }
         },
-        verificationFailed: (FirebaseAuthException error) {
+        verificationFailed: (FirebaseAuthException error) async {
+          if (!isCurrent()) return;
           debugPrint(
             '[PHONE_AUTH] verificationFailed code=${error.code} '
-            'message=${error.message}',
+            'native app verification failed',
           );
           if (error.code == 'too-many-requests' ||
               error.code == 'quota-exceeded') {
-            unawaited(_otpGate.rateLimited(e164Phone));
-          }
-          if (!forceRecaptcha && _needsRecaptchaFallback(error)) {
-            debugPrint(
-              '[PHONE_AUTH] Play Integrity SHA mismatch; retry reCAPTCHA',
-            );
-            _sendOtp(
-              e164Phone: e164Phone,
-              forceResendingToken: forceResendingToken,
-              onCodeSent: onCodeSent,
-              onAutoVerified: onAutoVerified,
-              onError: onError,
-              onAutoRetrievalTimeout: onAutoRetrievalTimeout,
-              forceRecaptcha: true,
-            );
-            return;
+            try {
+              await _otpGate.rateLimited(e164Phone);
+            } catch (_) {
+              debugPrint('[PHONE_AUTH] could not persist OTP cooldown');
+            }
           }
           onError(humanize(error));
         },
@@ -243,24 +268,29 @@ class PhoneAuthService {
       );
     }
     PhoneAuthSession.capture(user);
+    if (signupDraft != null) {
+      HotelSettingsStore.hotelName = signupDraft!['hotelName']!;
+      await user.updateDisplayName(signupDraft!['ownerName']);
+    }
     debugPrint('[PHONE_AUTH] signed in');
     final account = await HotelFirestoreService.instance.ensureOwnerBusiness(
       user,
-      allowCreate: userCredential.additionalUserInfo?.isNewUser == true,
+      allowCreate: signupDraft != null,
     );
     PhoneAuthSession.businessId = account?.businessId;
-    await CloudSyncService.bindLoginPhoneStore(user.phoneNumber ?? '');
+    if (account == null || HotelFirestoreService.instance.lastError != null) {
+      final message =
+          HotelFirestoreService.instance.lastError ??
+          'Create your account using Sign up first.';
+      await signOutAuthOnly();
+      throw StateError(message);
+    }
+    signupDraft = null;
 
     debugPrint(
-      '[PHONE_AUTH] businessId=${account?.businessId ?? ''} '
+      '[PHONE_AUTH] businessId=${account.businessId} '
       'uid=${user.uid}',
     );
-    if (account == null) {
-      debugPrint(
-        'HotelFirestore owner/business bootstrap did not complete. '
-        'Local hotel data remains the primary fallback.',
-      );
-    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       appNavigatorKey.currentState?.popUntil(
         (Route<dynamic> route) => route.isFirst,
@@ -284,18 +314,23 @@ class PhoneAuthService {
           return 'Incorrect OTP. Please try again.';
         case 'invalid-verification-id':
           return 'OTP session expired. Please resend OTP.';
+        case 'invalid-app-credential':
         case 'missing-client-identifier':
         case 'app-not-authorized':
-          return _playSigningHelp;
+          return _appVerificationSetupHelp;
         case 'network-request-failed':
           return 'No internet connection. Check network and retry.';
         case 'user-disabled':
           return 'This account is disabled.';
+        case 'web-context-already-presented':
+          return 'A verification window is already open. Complete or close it before trying again.';
+        case 'web-context-cancelled':
+          return 'Phone verification was cancelled. Please try again.';
         case 'captcha-check-failed':
           return 'Phone verification check failed. Try again.';
         default:
-          if (_needsRecaptchaFallback(error)) {
-            return _playSigningHelp;
+          if (_isAppVerificationConfigurationError(error)) {
+            return _appVerificationSetupHelp;
           }
           final String? message = error.message;
           if (message != null && message.trim().isNotEmpty) {
@@ -307,10 +342,12 @@ class PhoneAuthService {
     return error.toString();
   }
 
-  static const String _playSigningHelp =
-      'Phone verification needs the Play signing SHA-256 in Firebase. Check internet and tap Send OTP again.';
+  static const String _appVerificationSetupHelp =
+      'Phone verification setup is incomplete for this app. Please contact support before retrying.';
 
-  static bool _needsRecaptchaFallback(FirebaseAuthException error) {
+  static bool _isAppVerificationConfigurationError(
+    FirebaseAuthException error,
+  ) {
     final String blob = '${error.code} ${error.message ?? ''}'.toLowerCase();
     return blob.contains('play_integrity') ||
         blob.contains('sha-256') ||

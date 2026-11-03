@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/hotel_data_buffer.dart';
 
 import '../services/hotel_cloud_sync_service.dart';
 
@@ -71,7 +71,7 @@ class HotelSettingsStore {
   }
 
   static Future<void> loadSettings() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
 
     hotelName = prefs.getString(_hotelNameKey) ?? "Hotel";
 
@@ -100,7 +100,7 @@ class HotelSettingsStore {
     double? gstTaxRateValue,
     required String adminPasswordValue,
   }) async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
 
     hotelName = hotelNameValue.trim();
     hotelAddress = hotelAddressValue.trim();

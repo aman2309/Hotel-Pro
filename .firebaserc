@@ -1,6 +1,6 @@
 {
   "projects": {
-    "default": "planning-with-ai-881ba"
+    "default": "yankees-hotel-pro"
   },
   "targets": {
     "planning-with-ai-881ba": {
@@ -14,6 +14,11 @@
       "storage": {
         "rules": [
           "yankees-hotel-pro.firebasestorage.app"
+        ]
+      },
+      "hosting": {
+        "admin": [
+          "hotel-pro-admin-731313332286"
         ]
       }
     }

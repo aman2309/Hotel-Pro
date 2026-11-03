@@ -1,17 +1,24 @@
+import '../widgets/available_room_actions.dart';
+import '../widgets/custom_bottom_sheet.dart';
+import 'hotel_dashboard_view.dart';
+import '../widgets/hotel_ui.dart';
+import '../theme/custom_colors.dart';
+import '../theme/app_theme.dart';
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/hotel_data_buffer.dart';
 
-import '../config/backend_config.dart';
+import '../services/phone_auth_service.dart';
+import 'cloud_gate.dart';
 import '../services/cloud_sync_service.dart';
-import '../services/cpanel_sync_service.dart';
 import '../services/hotel_cloud_sync_service.dart';
+import '../services/hotel_sync_plan.dart';
 import '../dialogs/booking_view_dialog.dart';
+import '../dialogs/cancel_future_booking_sheet.dart';
 import '../dialogs/bill_preview_dialog.dart';
 import '../dialogs/booking_dialog.dart';
-import '../data/default_rooms.dart';
 import '../models/room.dart';
 import '../models/customer.dart';
 import '../models/bill_record.dart';
@@ -27,7 +34,6 @@ import '../dialogs/backup_restore_dialog.dart';
 import '../dialogs/fresh_hotel_start_dialog.dart';
 import '../dialogs/hotel_settings_dialog.dart';
 import '../services/license_service.dart';
-import '../widgets/hotel_cloud_status_chip.dart';
 import '../widgets/trial_banner.dart';
 
 class RoomDashboard extends StatefulWidget {
@@ -44,14 +50,9 @@ class _RoomDashboardState extends State<RoomDashboard>
   Timer? _stayTimer;
   Timer? _cloudPoll;
   bool _syncInFlight = false;
-  final List<Room> rooms = [
-    for (final DefaultRoomSpec spec in kDefaultRoomSpecs)
-      Room(
-        roomNumber: spec.roomNumber,
-        roomType: spec.roomType,
-        normalRent: spec.normalRent,
-      ),
-  ];
+  bool _refreshing = false;
+  bool _roomsLoading = true;
+  final List<Room> rooms = [];
 
   int _seenRemoteRevision = 0;
   int _roomActionDepth = 0;
@@ -70,11 +71,26 @@ class _RoomDashboardState extends State<RoomDashboard>
     final sync = HotelCloudSyncService.instance;
     await sync.beginLocalAction();
     _roomActionDepth++;
+    var cancelled = false;
     try {
       return await action();
+    } catch (_) {
+      if (HotelDataBuffer.cloudOnly) {
+        await sync.cancelLocalAction();
+        cancelled = true;
+        await loadRooms();
+      }
+      rethrow;
     } finally {
       _roomActionDepth--;
-      await sync.endLocalAction();
+      if (!cancelled) {
+        try {
+          await sync.endLocalAction();
+        } catch (_) {
+          if (HotelDataBuffer.cloudOnly) await loadRooms();
+          rethrow;
+        }
+      }
       if (_roomActionDepth == 0) {
         _showSaveResult();
       }
@@ -104,10 +120,6 @@ class _RoomDashboardState extends State<RoomDashboard>
     if (_syncInFlight || _roomActionDepth > 0) return;
     _syncInFlight = true;
     try {
-      if (hotelUsesCpanel) {
-        await CpanelSyncService.instance.retry();
-        return;
-      }
       if (HotelCloudSyncService.instance.bootstrapped) {
         await HotelCloudSyncService.instance.retry();
       }
@@ -140,7 +152,7 @@ class _RoomDashboardState extends State<RoomDashboard>
     HotelCloudSyncService.instance.addListener(_onCloudChanged);
     unawaited(_autoSync());
     _cloudPoll = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (hotelUsesCpanel) unawaited(_autoSync());
+      unawaited(_autoSync());
     });
 
     _stayTimer = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
@@ -171,11 +183,13 @@ class _RoomDashboardState extends State<RoomDashboard>
   void _showSaveResult() {
     final String? message = HotelCloudSyncService.instance.lastError;
     if (message == null || !mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> saveRooms() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
 
     final roomData = rooms.map((room) => room.toJson()).toList();
 
@@ -187,15 +201,12 @@ class _RoomDashboardState extends State<RoomDashboard>
   }
 
   Future<void> loadRooms() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
 
     final savedData = prefs.getString(CloudSyncService.roomKey);
 
-    if (savedData == null) {
-      if (!LicenseService.instance.canEditHotel) return;
-      await saveRooms();
-      return;
-    }
+    // Missing data means it has not arrived yet, not an empty hotel.
+    if (savedData == null) return;
 
     final decoded = jsonDecode(savedData) as List<dynamic>;
 
@@ -226,6 +237,7 @@ class _RoomDashboardState extends State<RoomDashboard>
       rooms
         ..clear()
         ..addAll(nextRooms);
+      _roomsLoading = false;
 
       for (final Room room in rooms) {
         if (room.status == "BOOKED" && room.bookingTime == null) {
@@ -237,18 +249,18 @@ class _RoomDashboardState extends State<RoomDashboard>
 
   Color getRoomColor(String status) {
     if (status == "EMPTY") {
-      return Colors.green.shade700;
+      return AppColors.available;
     }
 
     if (status == "BOOKED") {
-      return Colors.red.shade700;
+      return AppColors.booked;
     }
 
     if (status == "CLEANING") {
-      return Colors.amber.shade700;
+      return AppColors.cleaning;
     }
 
-    return const Color(0xFF800000);
+    return AppColors.closed;
   }
 
   int countStatus(String status) {
@@ -291,14 +303,14 @@ class _RoomDashboardState extends State<RoomDashboard>
         return;
       }
 
-      await showDialog(
+      await showCustomBottomSheet(
         context: context,
         builder: (BuildContext dialogContext) {
-          return AlertDialog(
+          return CustomDialog(
             title: const Text("No Room Available"),
             content: const Text("No empty room is available for room change."),
             actions: [
-              TextButton(
+              CustomButton.text(
                 onPressed: () {
                   Navigator.pop(dialogContext);
                 },
@@ -314,12 +326,12 @@ class _RoomDashboardState extends State<RoomDashboard>
 
     Room? selectedRoom;
 
-    bool? changeConfirmed = await showDialog<bool>(
+    bool? changeConfirmed = await showCustomBottomSheet<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter updateDialog) {
-            return AlertDialog(
+            return CustomDialog(
               title: Text("Change Room ${oldRoom.roomNumber}"),
               content: SizedBox(
                 width: 450,
@@ -341,12 +353,12 @@ class _RoomDashboardState extends State<RoomDashboard>
 
                     const SizedBox(height: 20),
 
-                    DropdownButtonFormField<Room>(
+                    CustomDropdown<Room>(
                       initialValue: selectedRoom,
                       decoration: const InputDecoration(
                         labelText: "Select New Room",
                         border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.hotel),
+                        prefixIcon: Icon(Icons.hotel_rounded),
                       ),
                       items: availableRooms.map((Room room) {
                         return DropdownMenuItem<Room>(
@@ -396,21 +408,21 @@ class _RoomDashboardState extends State<RoomDashboard>
                 ),
               ),
               actions: [
-                TextButton(
+                CustomButton.text(
                   onPressed: () {
                     Navigator.pop(dialogContext, false);
                   },
-                  child: const Text("CANCEL"),
+                  child: const Text("Cancel"),
                 ),
 
-                ElevatedButton.icon(
+                CustomButton.icon(
                   onPressed: selectedRoom == null
                       ? null
                       : () {
                           Navigator.pop(dialogContext, true);
                         },
-                  icon: const Icon(Icons.swap_horiz),
-                  label: const Text("CONFIRM ROOM CHANGE"),
+                  icon: const Icon(Icons.swap_horiz_rounded),
+                  label: const Text("Confirm room change"),
                 ),
               ],
             );
@@ -495,10 +507,10 @@ class _RoomDashboardState extends State<RoomDashboard>
       return;
     }
 
-    await showDialog(
+    await showCustomBottomSheet(
       context: context,
       builder: (BuildContext successContext) {
-        return AlertDialog(
+        return CustomDialog(
           title: const Text("Room Changed Successfully"),
           content: Text(
             "Guest : $transferGuestName\n\n"
@@ -509,7 +521,7 @@ class _RoomDashboardState extends State<RoomDashboard>
             "Room $newRoomNumber is now BOOKED.",
           ),
           actions: [
-            TextButton(
+            CustomButton.text(
               autofocus: true,
               onPressed: () {
                 Navigator.pop(successContext);
@@ -571,13 +583,13 @@ class _RoomDashboardState extends State<RoomDashboard>
 
       String paymentMode = "Cash";
 
-      bool? paymentConfirmed = await showDialog<bool>(
+      bool? paymentConfirmed = await showCustomBottomSheet<bool>(
         context: context,
         barrierDismissible: false,
         builder: (BuildContext dialogContext) {
           return StatefulBuilder(
             builder: (BuildContext context, StateSetter updateDialog) {
-              return AlertDialog(
+              return CustomDialog(
                 title: Text("Checkout Room ${room.roomNumber}"),
                 content: SizedBox(
                   width: 480,
@@ -644,7 +656,7 @@ class _RoomDashboardState extends State<RoomDashboard>
 
                         const SizedBox(height: 10),
 
-                        TextField(
+                        CustomTextField(
                           controller: discountController,
                           focusNode: discountFocus,
                           keyboardType: TextInputType.number,
@@ -653,7 +665,7 @@ class _RoomDashboardState extends State<RoomDashboard>
                             paymentModeFocus.requestFocus();
                           },
                           decoration: const InputDecoration(
-                            labelText: "DISCOUNT",
+                            labelText: "Discount",
                             prefixText: "₹ ",
                             border: OutlineInputBorder(),
                           ),
@@ -694,7 +706,7 @@ class _RoomDashboardState extends State<RoomDashboard>
                         Text(
                           "BALANCE PAYMENT : ₹$balance",
                           style: const TextStyle(
-                            color: Colors.red,
+                            color: CustomColors.error,
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
                           ),
@@ -702,13 +714,13 @@ class _RoomDashboardState extends State<RoomDashboard>
 
                         const SizedBox(height: 20),
 
-                        DropdownButtonFormField<String>(
+                        CustomDropdown<String>(
                           focusNode: paymentModeFocus,
                           initialValue: paymentMode,
                           decoration: const InputDecoration(
                             labelText: "Balance Payment Mode",
                             border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.payment),
+                            prefixIcon: Icon(Icons.payment_rounded),
                           ),
                           items: const [
                             DropdownMenuItem(
@@ -746,20 +758,20 @@ class _RoomDashboardState extends State<RoomDashboard>
                   ),
                 ),
                 actions: [
-                  TextButton(
+                  CustomButton.text(
                     onPressed: () {
                       Navigator.pop(dialogContext, false);
                     },
-                    child: const Text("CANCEL"),
+                    child: const Text("Cancel"),
                   ),
 
-                  ElevatedButton.icon(
+                  CustomButton.icon(
                     autofocus: true,
                     focusNode: checkoutButtonFocus,
                     onPressed: () {
                       Navigator.pop(dialogContext, true);
                     },
-                    icon: const Icon(Icons.check_circle),
+                    icon: const Icon(Icons.check_circle_rounded),
                     label: Text("RECEIVE ₹$balance & CHECKOUT"),
                   ),
                 ],
@@ -820,6 +832,7 @@ class _RoomDashboardState extends State<RoomDashboard>
         "bookingDate": live.bookingDate?.toIso8601String(),
         "bookingTime": live.bookingTime?.toIso8601String(),
         "checkoutTime": live.checkoutTime?.toIso8601String(),
+        "stayDurationMinutes": finalBill.finalStayMinutes,
         "roomRate": live.bookingRate,
         "days": live.days,
         "roomBill": roomBill,
@@ -844,6 +857,7 @@ class _RoomDashboardState extends State<RoomDashboard>
           "bookingDate": live.bookingDate?.toIso8601String(),
           "bookingTime": live.bookingTime?.toIso8601String(),
           "checkoutTime": live.checkoutTime?.toIso8601String(),
+          "stayDurationMinutes": finalBill.finalStayMinutes,
           "roomRate": live.bookingRate,
           "days": live.days,
           "roomBill": roomBill,
@@ -878,28 +892,28 @@ class _RoomDashboardState extends State<RoomDashboard>
   }
 
   Future<void> completeCleaning(Room room) async {
-    bool? confirmed = await showDialog<bool>(
+    bool? confirmed = await showCustomBottomSheet<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
-        return AlertDialog(
+        return CustomDialog(
           title: Text("Room ${room.roomNumber} Cleaning"),
           content: const Text(
             "Is room cleaning complete?\n\n"
             "Guest and old billing data will be cleared.",
           ),
           actions: [
-            TextButton(
+            CustomButton.text(
               onPressed: () {
                 Navigator.pop(dialogContext, false);
               },
-              child: const Text("CANCEL"),
+              child: const Text("Cancel"),
             ),
-            ElevatedButton.icon(
+            CustomButton.icon(
               onPressed: () {
                 Navigator.pop(dialogContext, true);
               },
-              icon: const Icon(Icons.cleaning_services),
-              label: const Text("CLEANING COMPLETE"),
+              icon: const Icon(Icons.cleaning_services_rounded),
+              label: const Text("Cleaning complete"),
             ),
           ],
         );
@@ -932,12 +946,12 @@ class _RoomDashboardState extends State<RoomDashboard>
         ? "Technical Fault"
         : room.faultReason;
 
-    String? action = await showDialog<String>(
+    String? action = await showCustomBottomSheet<String>(
       context: context,
       builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter updateDialog) {
-            return AlertDialog(
+            return CustomDialog(
               title: Text("ROOM ${room.roomNumber} - CLOSED"),
               content: SizedBox(
                 width: 450,
@@ -948,7 +962,7 @@ class _RoomDashboardState extends State<RoomDashboard>
                     const Text(
                       "● ROOM CLOSED",
                       style: TextStyle(
-                        color: Color(0xFF800000),
+                        color: AppColors.ink,
                         fontSize: 19,
                         fontWeight: FontWeight.bold,
                       ),
@@ -956,12 +970,12 @@ class _RoomDashboardState extends State<RoomDashboard>
 
                     const SizedBox(height: 15),
 
-                    DropdownButtonFormField<String>(
+                    CustomDropdown<String>(
                       initialValue: selectedFault,
                       decoration: const InputDecoration(
                         labelText: "Fault / Closing Reason",
                         border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.build),
+                        prefixIcon: Icon(Icons.build_rounded),
                       ),
                       items: const [
                         DropdownMenuItem(
@@ -1005,29 +1019,29 @@ class _RoomDashboardState extends State<RoomDashboard>
                 ),
               ),
               actions: [
-                TextButton(
+                CustomButton.text(
                   onPressed: () {
                     Navigator.pop(dialogContext, "CLOSE");
                   },
-                  child: const Text("CLOSE"),
+                  child: const Text("Close"),
                 ),
 
-                OutlinedButton.icon(
+                CustomButton.outlineIcon(
                   onPressed: () {
                     room.faultReason = selectedFault;
 
                     Navigator.pop(dialogContext, "SAVED");
                   },
-                  icon: const Icon(Icons.save),
-                  label: const Text("SAVE FAULT"),
+                  icon: const Icon(Icons.save_rounded),
+                  label: const Text("Save fault"),
                 ),
 
-                ElevatedButton.icon(
+                CustomButton.icon(
                   onPressed: () {
                     Navigator.pop(dialogContext, "REPAIRED");
                   },
-                  icon: const Icon(Icons.check_circle),
-                  label: const Text("ROOM REPAIRED / OPEN ROOM"),
+                  icon: const Icon(Icons.check_circle_rounded),
+                  label: const Text("Room repaired / open room"),
                 ),
               ],
             );
@@ -1078,6 +1092,50 @@ class _RoomDashboardState extends State<RoomDashboard>
     }
   }
 
+  Future<bool?> _bookRoomAndConfirm(Room source) {
+    final expected = hotelRecordFingerprint(source.toJson());
+    final sync = HotelCloudSyncService.instance;
+    return showBookingDialog(
+      context,
+      source,
+      prepareGuests: () => sync.commitActionCheckpoint(requirePhotos: true),
+      saveBooking: (draft) async {
+        final current = liveRoom(source);
+        final actual = hotelRecordFingerprint(current.toJson());
+        if (!rooms.contains(current) ||
+            (actual != expected &&
+                actual != hotelRecordFingerprint(draft.toJson()))) {
+          throw StateError(
+            'This room changed while you were booking. Close this form and refresh.',
+          );
+        }
+        current.copyFrom(draft);
+        try {
+          await saveRooms();
+          await sync.commitActionCheckpoint(requirePhotos: true);
+        } catch (_) {
+          await loadRooms();
+          rethrow;
+        }
+      },
+    );
+  }
+
+  Future<void> _cancelFutureBooking(Room room) async {
+    if (!room.futureBooking) return;
+    final confirmed = await showCancelFutureBookingSheet(context, room);
+    if (confirmed != true || !mounted) return;
+    room = liveRoom(room);
+    room.clearFutureBooking();
+    await saveRooms();
+    await HotelCloudSyncService.instance.commitActionCheckpoint();
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Future booking cancelled.')));
+  }
+
   Future<void> _openRoom(Room room) async {
     room = liveRoom(room);
 
@@ -1090,32 +1148,37 @@ class _RoomDashboardState extends State<RoomDashboard>
       return;
     }
     if (room.futureBooking && room.status != "BOOKED") {
-      String? futureAction = await showDialog<String>(
+      String? futureAction = await showCustomBottomSheet<String>(
         context: context,
         builder: (BuildContext futureContext) {
-          return AlertDialog(
+          return CustomDialog(
             title: Text("ROOM ${room.roomNumber}"),
             content: const Text("This room has a Future Booking"),
             actions: [
-              TextButton(
+              CustomButton.text(
                 onPressed: () {
                   Navigator.pop(futureContext, "CLOSE");
                 },
-                child: const Text("CLOSE"),
+                child: const Text("Close"),
               ),
-              OutlinedButton.icon(
+              CustomButton.outlineIcon(
                 onPressed: () {
                   Navigator.pop(futureContext, "VIEW");
                 },
-                icon: const Icon(Icons.visibility),
-                label: const Text("VIEW FUTURE BOOKING"),
+                icon: const Icon(Icons.visibility_rounded),
+                label: const Text("View future booking"),
               ),
-              ElevatedButton.icon(
+              CustomButton.outlineIcon(
+                onPressed: () => Navigator.pop(futureContext, 'CANCEL_FUTURE'),
+                icon: const Icon(Icons.event_busy_rounded),
+                label: const Text('Cancel future booking'),
+              ),
+              CustomButton.icon(
                 onPressed: () {
                   Navigator.pop(futureContext, "NEW_BOOKING");
                 },
-                icon: const Icon(Icons.add),
-                label: const Text("NEW BOOKING"),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text("New booking"),
               ),
             ],
           );
@@ -1126,6 +1189,11 @@ class _RoomDashboardState extends State<RoomDashboard>
         return;
       }
 
+      if (futureAction == 'CANCEL_FUTURE') {
+        await _cancelFutureBooking(room);
+        return;
+      }
+
       if (futureAction == "VIEW") {
         await showBookingViewDialog(context, room, showFutureBooking: true);
 
@@ -1133,7 +1201,7 @@ class _RoomDashboardState extends State<RoomDashboard>
       }
 
       if (futureAction == "NEW_BOOKING") {
-        bool? booked = await showBookingDialog(context, room);
+        bool? booked = await _bookRoomAndConfirm(room);
 
         if (booked == true && mounted) {
           setState(() {});
@@ -1150,6 +1218,11 @@ class _RoomDashboardState extends State<RoomDashboard>
 
       // Save part payments / charges / days added inside room control.
       await saveRooms();
+
+      if (action == 'CANCEL_FUTURE') {
+        await _cancelFutureBooking(room);
+        return;
+      }
 
       if (action == "CHANGE_ROOM") {
         await changeRoom(room);
@@ -1168,10 +1241,10 @@ class _RoomDashboardState extends State<RoomDashboard>
       return;
     }
 
-    bool? openBooking = await showDialog<bool>(
+    bool? openBooking = await showCustomBottomSheet<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
-        return AlertDialog(
+        return CustomDialog(
           title: Text("ROOM ${room.roomNumber}"),
           content: SizedBox(
             width: 420,
@@ -1193,9 +1266,9 @@ class _RoomDashboardState extends State<RoomDashboard>
                 if (room.futureBooking && room.futureBookingDate != null) ...[
                   const SizedBox(height: 15),
                   Text(
-                    "FUTURE BOOKING",
+                    "Future booking",
                     style: TextStyle(
-                      color: Colors.blue.shade700,
+                      color: AppColors.ink,
                       fontSize: 17,
                       fontWeight: FontWeight.bold,
                     ),
@@ -1211,53 +1284,29 @@ class _RoomDashboardState extends State<RoomDashboard>
                   Text("Guest : ${room.futureGuestName}"),
                 ],
                 const SizedBox(height: 20),
-                if (room.status == "EMPTY")
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(dialogContext, true);
-                      },
-                      icon: const Icon(Icons.book_online),
-                      label: const Text("BOOK ROOM"),
-                    ),
+                if (room.status == 'EMPTY')
+                  AvailableRoomActions(
+                    onBook: () => Navigator.pop(dialogContext, true),
+                    onClose: () async {
+                      setState(() {
+                        room.status = 'CLOSED';
+                        room.faultReason = 'Technical Fault';
+                      });
+                      await saveRooms();
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext, false);
+                      }
+                    },
                   ),
-
-                if (room.status == "EMPTY") ...[
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: SizedBox(
-                      height: 36,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            room.status = "CLOSED";
-                            room.faultReason = "Technical Fault";
-                          });
-
-                          saveRooms();
-
-                          Navigator.pop(dialogContext, false);
-                        },
-                        icon: const Icon(Icons.lock_outline, size: 16),
-                        label: const Text(
-                          "TEMPORARY CLOSED",
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
           actions: [
-            TextButton(
+            CustomButton.text(
               onPressed: () {
                 Navigator.pop(dialogContext, false);
               },
-              child: const Text("CLOSE"),
+              child: const Text("Close"),
             ),
           ],
         );
@@ -1265,7 +1314,7 @@ class _RoomDashboardState extends State<RoomDashboard>
     );
 
     if (openBooking == true && mounted) {
-      bool? bookingSaved = await showBookingDialog(context, room);
+      bool? bookingSaved = await _bookRoomAndConfirm(room);
 
       if (bookingSaved == true && mounted) {
         setState(() {});
@@ -1284,6 +1333,26 @@ class _RoomDashboardState extends State<RoomDashboard>
     return highest + 1;
   }
 
+  Future<void> _refreshHotel() async {
+    if (_refreshing || _roomActionDepth > 0) return;
+    setState(() => _refreshing = true);
+    try {
+      await HotelCloudSyncService.instance.retry();
+      if (HotelCloudSyncService.instance.lastError != null) {
+        throw StateError(HotelCloudSyncService.instance.lastError!);
+      }
+      await _reloadAfterCloudApply();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Refresh failed: $error')));
+      }
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
   Future<void> addRoom() async {
     final roomNumberController = TextEditingController();
     final roomTypeController = TextEditingController();
@@ -1292,7 +1361,7 @@ class _RoomDashboardState extends State<RoomDashboard>
     final typeFocus = FocusNode();
     final rentFocus = FocusNode();
 
-    await showDialog(
+    await showCustomBottomSheet(
       context: context,
       builder: (BuildContext dialogContext) {
         Future<void> saveRoom() async {
@@ -1358,14 +1427,14 @@ class _RoomDashboardState extends State<RoomDashboard>
           Navigator.pop(dialogContext);
         }
 
-        return AlertDialog(
+        return CustomDialog(
           title: const Text("Add New Room"),
           content: SizedBox(
             width: 420,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(
+                CustomTextField(
                   controller: roomNumberController,
                   autofocus: true,
                   textCapitalization: TextCapitalization.words,
@@ -1378,7 +1447,7 @@ class _RoomDashboardState extends State<RoomDashboard>
                     typeFocus.requestFocus();
                   },
                 ),
-                TextField(
+                CustomTextField(
                   controller: roomTypeController,
                   focusNode: typeFocus,
                   textInputAction: TextInputAction.next,
@@ -1387,7 +1456,7 @@ class _RoomDashboardState extends State<RoomDashboard>
                     rentFocus.requestFocus();
                   },
                 ),
-                TextField(
+                CustomTextField(
                   controller: roomRentController,
                   focusNode: rentFocus,
                   keyboardType: TextInputType.number,
@@ -1403,16 +1472,16 @@ class _RoomDashboardState extends State<RoomDashboard>
             ),
           ),
           actions: [
-            TextButton(
+            CustomButton.text(
               onPressed: () {
                 Navigator.pop(dialogContext);
               },
-              child: const Text("CANCEL"),
+              child: const Text("Cancel"),
             ),
-            ElevatedButton.icon(
+            CustomButton.icon(
               onPressed: saveRoom,
-              icon: const Icon(Icons.add),
-              label: const Text("ADD ROOM"),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text("Add room"),
             ),
           ],
         );
@@ -1420,93 +1489,100 @@ class _RoomDashboardState extends State<RoomDashboard>
     );
   }
 
-  Future<void> deleteRoom() async {
+  Future<void> deleteRoom([Room? targetRoom]) async {
     final emptyRooms = rooms.where((room) {
-      return room.status == "EMPTY";
+      return room.status != "BOOKED" && !room.futureBooking;
     }).toList();
 
     if (emptyRooms.isEmpty) {
       return;
     }
 
-    Room? selectedRoom;
-
-    final roomSelected = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter updateDialog) {
-            return AlertDialog(
-              title: const Text("Select Room To Delete"),
-              content: SizedBox(
-                width: 420,
-                child: DropdownButtonFormField<Room>(
-                  decoration: const InputDecoration(
-                    labelText: "Select EMPTY Room",
-                    border: OutlineInputBorder(),
+    if (targetRoom != null &&
+        (targetRoom.status == 'BOOKED' || targetRoom.futureBooking)) {
+      throw StateError(
+        'Finish or cancel the room booking before editing or deleting it.',
+      );
+    }
+    Room? selectedRoom = targetRoom;
+    if (selectedRoom == null) {
+      final roomSelected = await showCustomBottomSheet<bool>(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return StatefulBuilder(
+            builder: (BuildContext context, StateSetter updateDialog) {
+              return CustomDialog(
+                title: const Text("Select Room To Delete"),
+                content: SizedBox(
+                  width: 420,
+                  child: CustomDropdown<Room>(
+                    decoration: const InputDecoration(
+                      labelText: "Select room",
+                      border: OutlineInputBorder(),
+                    ),
+                    items: emptyRooms.map((room) {
+                      return DropdownMenuItem<Room>(
+                        value: room,
+                        child: Text("${room.label} - ${room.roomType}"),
+                      );
+                    }).toList(),
+                    onChanged: (Room? room) {
+                      updateDialog(() {
+                        selectedRoom = room;
+                      });
+                    },
                   ),
-                  items: emptyRooms.map((room) {
-                    return DropdownMenuItem<Room>(
-                      value: room,
-                      child: Text("${room.label} - ${room.roomType}"),
-                    );
-                  }).toList(),
-                  onChanged: (Room? room) {
-                    updateDialog(() {
-                      selectedRoom = room;
-                    });
-                  },
                 ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(dialogContext, false);
-                  },
-                  child: const Text("CANCEL"),
-                ),
-                ElevatedButton.icon(
-                  onPressed: selectedRoom == null
-                      ? null
-                      : () {
-                          Navigator.pop(dialogContext, true);
-                        },
-                  icon: const Icon(Icons.delete),
-                  label: const Text("DELETE"),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
+                actions: [
+                  CustomButton.text(
+                    onPressed: () {
+                      Navigator.pop(dialogContext, false);
+                    },
+                    child: const Text("Cancel"),
+                  ),
+                  CustomButton.icon(
+                    onPressed: selectedRoom == null
+                        ? null
+                        : () {
+                            Navigator.pop(dialogContext, true);
+                          },
+                    icon: const Icon(Icons.delete_rounded),
+                    label: const Text("Delete"),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
 
-    if (roomSelected != true || selectedRoom == null || !mounted) {
-      return;
+      if (roomSelected != true || selectedRoom == null || !mounted) {
+        return;
+      }
     }
 
     final room = selectedRoom!;
 
-    final deleteConfirmed = await showDialog<bool>(
+    final deleteConfirmed = await showCustomBottomSheet<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
-        return AlertDialog(
+        return CustomDialog(
           title: const Text("Delete Room?"),
           content: Text(
             "Are you sure you want to delete Room ${room.roomNumber}?",
           ),
           actions: [
-            TextButton(
+            CustomButton.text(
               onPressed: () {
                 Navigator.pop(dialogContext, false);
               },
               child: const Text("NO"),
             ),
-            ElevatedButton.icon(
+            CustomButton.icon(
               onPressed: () {
                 Navigator.pop(dialogContext, true);
               },
-              icon: const Icon(Icons.delete_forever),
+              icon: const Icon(Icons.delete_forever_rounded),
               label: const Text("YES, DELETE"),
             ),
           ],
@@ -1523,69 +1599,76 @@ class _RoomDashboardState extends State<RoomDashboard>
     }
   }
 
-  Future<void> editRoom() async {
+  Future<void> editRoom([Room? targetRoom]) async {
     final editableRooms = rooms.where((room) {
-      return room.status == "EMPTY";
+      return room.status != "BOOKED" && !room.futureBooking;
     }).toList();
 
     if (editableRooms.isEmpty) {
       return;
     }
 
-    Room? selectedRoom;
-
-    bool? roomSelected = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter updateDialog) {
-            return AlertDialog(
-              title: const Text("Select Room To Edit"),
-              content: SizedBox(
-                width: 420,
-                child: DropdownButtonFormField<Room>(
-                  decoration: const InputDecoration(
-                    labelText: "Select EMPTY Room",
-                    border: OutlineInputBorder(),
+    if (targetRoom != null &&
+        (targetRoom.status == 'BOOKED' || targetRoom.futureBooking)) {
+      throw StateError(
+        'Finish or cancel the room booking before editing or deleting it.',
+      );
+    }
+    Room? selectedRoom = targetRoom;
+    if (selectedRoom == null) {
+      bool? roomSelected = await showCustomBottomSheet<bool>(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return StatefulBuilder(
+            builder: (BuildContext context, StateSetter updateDialog) {
+              return CustomDialog(
+                title: const Text("Select Room To Edit"),
+                content: SizedBox(
+                  width: 420,
+                  child: CustomDropdown<Room>(
+                    decoration: const InputDecoration(
+                      labelText: "Select room",
+                      border: OutlineInputBorder(),
+                    ),
+                    items: editableRooms.map((room) {
+                      return DropdownMenuItem<Room>(
+                        value: room,
+                        child: Text("${room.label} - ${room.roomType}"),
+                      );
+                    }).toList(),
+                    onChanged: (Room? room) {
+                      updateDialog(() {
+                        selectedRoom = room;
+                      });
+                    },
                   ),
-                  items: editableRooms.map((room) {
-                    return DropdownMenuItem<Room>(
-                      value: room,
-                      child: Text("${room.label} - ${room.roomType}"),
-                    );
-                  }).toList(),
-                  onChanged: (Room? room) {
-                    updateDialog(() {
-                      selectedRoom = room;
-                    });
-                  },
                 ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(dialogContext, false);
-                  },
-                  child: const Text("CANCEL"),
-                ),
-                ElevatedButton.icon(
-                  onPressed: selectedRoom == null
-                      ? null
-                      : () {
-                          Navigator.pop(dialogContext, true);
-                        },
-                  icon: const Icon(Icons.edit),
-                  label: const Text("EDIT"),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
+                actions: [
+                  CustomButton.text(
+                    onPressed: () {
+                      Navigator.pop(dialogContext, false);
+                    },
+                    child: const Text("Cancel"),
+                  ),
+                  CustomButton.icon(
+                    onPressed: selectedRoom == null
+                        ? null
+                        : () {
+                            Navigator.pop(dialogContext, true);
+                          },
+                    icon: const Icon(Icons.edit_rounded),
+                    label: const Text("Edit"),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
 
-    if (roomSelected != true || selectedRoom == null || !mounted) {
-      return;
+      if (roomSelected != true || selectedRoom == null || !mounted) {
+        return;
+      }
     }
 
     final room = selectedRoom!;
@@ -1599,7 +1682,7 @@ class _RoomDashboardState extends State<RoomDashboard>
     final typeFocus = FocusNode();
     final rentFocus = FocusNode();
 
-    await showDialog(
+    await showCustomBottomSheet(
       context: context,
       builder: (BuildContext dialogContext) {
         Future<void> saveRoomChanges() async {
@@ -1666,14 +1749,14 @@ class _RoomDashboardState extends State<RoomDashboard>
           Navigator.pop(dialogContext);
         }
 
-        return AlertDialog(
+        return CustomDialog(
           title: Text("Edit Room ${room.label}"),
           content: SizedBox(
             width: 420,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(
+                CustomTextField(
                   controller: roomNumberController,
                   autofocus: true,
                   textCapitalization: TextCapitalization.words,
@@ -1686,7 +1769,7 @@ class _RoomDashboardState extends State<RoomDashboard>
                     typeFocus.requestFocus();
                   },
                 ),
-                TextField(
+                CustomTextField(
                   controller: roomTypeController,
                   focusNode: typeFocus,
                   textInputAction: TextInputAction.next,
@@ -1695,7 +1778,7 @@ class _RoomDashboardState extends State<RoomDashboard>
                     rentFocus.requestFocus();
                   },
                 ),
-                TextField(
+                CustomTextField(
                   controller: roomRentController,
                   focusNode: rentFocus,
                   keyboardType: TextInputType.number,
@@ -1711,16 +1794,16 @@ class _RoomDashboardState extends State<RoomDashboard>
             ),
           ),
           actions: [
-            TextButton(
+            CustomButton.text(
               onPressed: () {
                 Navigator.pop(dialogContext);
               },
-              child: const Text("CANCEL"),
+              child: const Text("Cancel"),
             ),
-            ElevatedButton.icon(
+            CustomButton.icon(
               onPressed: saveRoomChanges,
-              icon: const Icon(Icons.save),
-              label: const Text("SAVE CHANGES"),
+              icon: const Icon(Icons.save_rounded),
+              label: const Text("Save changes"),
             ),
           ],
         );
@@ -1730,15 +1813,15 @@ class _RoomDashboardState extends State<RoomDashboard>
 
   Future<void> freshHotelStart() async {
     if (HotelCloudSyncService.instance.isReady) {
-      await showDialog<void>(
+      await showCustomBottomSheet<void>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
+        builder: (dialogContext) => CustomDialog(
           title: const Text('Shared hotel records are protected'),
           content: const Text(
             'Fresh start cannot erase a shared cloud hotel. Export a backup and request a reviewed archive/reset before starting a new hotel.',
           ),
           actions: [
-            TextButton(
+            CustomButton.text(
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Close'),
             ),
@@ -1755,7 +1838,7 @@ class _RoomDashboardState extends State<RoomDashboard>
 
     CloudSyncService.autoSyncPaused = true;
 
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await HotelDataBuffer.getInstance();
 
     await prefs.remove(CloudSyncService.billKey);
     await prefs.remove(CloudSyncService.customerKey);
@@ -1810,18 +1893,18 @@ class _RoomDashboardState extends State<RoomDashboard>
       return;
     }
 
-    await showDialog(
+    await showCustomBottomSheet(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext successContext) {
-        return AlertDialog(
-          title: const Text("FRESH HOTEL START COMPLETE"),
+        return CustomDialog(
+          title: const Text("Fresh hotel start complete"),
           content: const Text(
             "All test data has been cleared successfully.\n\n"
             "Hotel is now ready for fresh real data.",
           ),
           actions: [
-            ElevatedButton(
+            CustomButton(
               autofocus: true,
               onPressed: () {
                 Navigator.pop(successContext);
@@ -1836,10 +1919,11 @@ class _RoomDashboardState extends State<RoomDashboard>
 
   Widget summaryBox(String title, int number, Color color) {
     return Container(
-      width: 62,
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+      width: 80,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
       decoration: BoxDecoration(
-        border: Border.all(color: color, width: 2),
+        color: CustomColors.surface,
+        border: Border.all(color: color.withValues(alpha: .18)),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -1848,14 +1932,14 @@ class _RoomDashboardState extends State<RoomDashboard>
             "$number",
             style: TextStyle(
               color: color,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
+              fontSize: 21,
+              fontWeight: FontWeight.w700,
             ),
           ),
           Text(
             title,
             maxLines: 1,
-            style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold),
+            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600),
           ),
         ],
       ),
@@ -1873,7 +1957,7 @@ class _RoomDashboardState extends State<RoomDashboard>
       setState(() {});
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("HOTEL SETTINGS SAVED SUCCESSFULLY")),
+        const SnackBar(content: Text("Hotel settings saved successfully")),
       );
     }
   }
@@ -1893,9 +1977,39 @@ class _RoomDashboardState extends State<RoomDashboard>
     );
   }
 
+  Future<void> _manageSelectedRoom(Room room, {required bool delete}) async {
+    try {
+      final current = liveRoom(room);
+      if (!rooms.contains(current)) {
+        throw StateError('This room no longer exists. Refresh the list.');
+      }
+      await _runRoomAction(
+        () => delete ? deleteRoom(current) : editRoom(current),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    }
+  }
+
   Future<void> handleMenuAction(String action) async {
     try {
-      await _runRoomAction(() => _handleMenuAction(action));
+      if (const {
+        'logout',
+        'reports',
+        'customers',
+        'expenses',
+        'settings',
+        'backup',
+        'fresh',
+      }.contains(action)) {
+        await _handleMenuAction(action);
+      } else {
+        await _runRoomAction(() => _handleMenuAction(action));
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -1907,6 +2021,61 @@ class _RoomDashboardState extends State<RoomDashboard>
 
   Future<void> _handleMenuAction(String action) async {
     switch (action) {
+      case "logout":
+        final leave = await showCustomBottomSheet<bool>(
+          context: context,
+          builder: (dialogContext) => CustomDialog(
+            icon: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: const BoxDecoration(
+                color: CustomColors.neutralTint,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.logout_rounded,
+                color: CustomColors.button,
+                size: 30,
+              ),
+            ),
+            title: const Text(
+              'See you again soon',
+              textAlign: TextAlign.center,
+            ),
+            content: const Text(
+              'Sign out of Hotel Pro? Your saved hotel data will be here when you return.',
+              textAlign: TextAlign.center,
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actions: [
+              CustomButton.text(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Stay here'),
+              ),
+              CustomButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Sign out'),
+              ),
+            ],
+          ),
+        );
+        if (leave != true || !mounted) return;
+        _cloudPoll?.cancel();
+        {
+          await HotelCloudSyncService.instance.retainDataForNextLogin();
+          await PhoneAuthService.instance.signOutAuthOnly();
+          HotelDataBuffer.clearSession();
+          BillStore.bills.clear();
+          CustomerStore.customers.clear();
+          ExpenseStore.expenses.clear();
+        }
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute<void>(
+            builder: (_) => const CloudGate(firebaseReady: true),
+          ),
+          (_) => false,
+        );
+        break;
       case "add":
         await addRoom();
         break;
@@ -1938,278 +2107,18 @@ class _RoomDashboardState extends State<RoomDashboard>
   }
 
   @override
-  Widget build(BuildContext context) {
-    final double screenWidth = MediaQuery.sizeOf(context).width;
-    final bool isCompact = screenWidth < 720;
-    final String hotelName = HotelSettingsStore.hotelName;
-
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.blue.shade700,
-        foregroundColor: Colors.white,
-        titleSpacing: isCompact ? 12 : null,
-        title: Text(
-          hotelName,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: isCompact ? 16 : 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: isCompact
-            ? [
-                const HotelCloudStatusChip(),
-                IconButton(
-                  tooltip: "REPORTS",
-                  onPressed: () {
-                    handleMenuAction("reports");
-                  },
-                  icon: const Icon(Icons.bar_chart),
-                ),
-                IconButton(
-                  tooltip: "CUSTOMERS",
-                  onPressed: () {
-                    handleMenuAction("customers");
-                  },
-                  icon: const Icon(Icons.people),
-                ),
-                PopupMenuButton<String>(
-                  tooltip: "MORE",
-                  onSelected: handleMenuAction,
-                  itemBuilder: (BuildContext menuContext) {
-                    return const [
-                      PopupMenuItem(value: "add", child: Text("ADD ROOM")),
-                      PopupMenuItem(value: "edit", child: Text("EDIT ROOM")),
-                      PopupMenuItem(
-                        value: "expenses",
-                        child: Text("HOTEL EXPENSES"),
-                      ),
-                      PopupMenuItem(
-                        value: "backup",
-                        child: Text("BACKUP / RESTORE"),
-                      ),
-                      PopupMenuItem(
-                        value: "fresh",
-                        child: Text("FRESH HOTEL START"),
-                      ),
-                      PopupMenuItem(
-                        value: "settings",
-                        child: Text("HOTEL SETTINGS"),
-                      ),
-                      PopupMenuItem(
-                        value: "delete",
-                        child: Text("DELETE ROOM"),
-                      ),
-                    ];
-                  },
-                ),
-              ]
-            : [
-                const HotelCloudStatusChip(),
-                IconButton(
-                  tooltip: "ADD ROOM",
-                  onPressed: () => handleMenuAction("add"),
-                  icon: const Icon(Icons.add),
-                ),
-                IconButton(
-                  tooltip: "EDIT ROOM",
-                  onPressed: () => handleMenuAction("edit"),
-                  icon: const Icon(Icons.edit),
-                ),
-                IconButton(
-                  tooltip: "CUSTOMERS",
-                  onPressed: () {
-                    handleMenuAction("customers");
-                  },
-                  icon: const Icon(Icons.people),
-                ),
-                IconButton(
-                  tooltip: "REPORTS",
-                  onPressed: () {
-                    handleMenuAction("reports");
-                  },
-                  icon: const Icon(Icons.bar_chart),
-                ),
-                IconButton(
-                  tooltip: "HOTEL EXPENSES",
-                  onPressed: () {
-                    handleMenuAction("expenses");
-                  },
-                  icon: const Icon(Icons.account_balance_wallet_outlined),
-                ),
-                IconButton(
-                  tooltip: "BACKUP / RESTORE DATA",
-                  onPressed: () => handleMenuAction("backup"),
-                  icon: const Icon(Icons.backup_outlined),
-                ),
-                IconButton(
-                  tooltip: "FRESH HOTEL START",
-                  onPressed: () => handleMenuAction("fresh"),
-                  icon: const Icon(Icons.restart_alt),
-                ),
-                IconButton(
-                  tooltip: "HOTEL SETTINGS",
-                  onPressed: () => handleMenuAction("settings"),
-                  icon: const Icon(Icons.settings),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: IconButton(
-                    tooltip: "DELETE ROOM",
-                    onPressed: () => handleMenuAction("delete"),
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                ),
-              ],
-      ),
-      body: Column(
-        children: [
-          TrialBanner(onActivated: _reloadAfterCloudApply),
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                isCompact ? 12 : 20,
-                isCompact ? 8 : 20,
-                isCompact ? 12 : 20,
-                isCompact ? 12 : 20,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Room Dashboard",
-                    style: TextStyle(
-                      fontSize: isCompact ? 18 : 28,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: isCompact ? 6 : 10),
-                  Wrap(
-                    spacing: 3,
-                    runSpacing: 3,
-                    children: [
-                      summaryBox("TOTAL", rooms.length, Colors.blueGrey),
-                      summaryBox("EMPTY", countStatus("EMPTY"), Colors.green),
-                      summaryBox("BOOKED", countStatus("BOOKED"), Colors.red),
-                      summaryBox(
-                        "CLEANING",
-                        countStatus("CLEANING"),
-                        Colors.amber,
-                      ),
-                      summaryBox(
-                        "CLOSED",
-                        countStatus("CLOSED"),
-                        const Color(0xFF800000),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: isCompact ? 6 : 12),
-                  Expanded(
-                    child: GridView.builder(
-                      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: isCompact ? 140 : 180,
-                        crossAxisSpacing: isCompact ? 10 : 15,
-                        mainAxisSpacing: isCompact ? 10 : 15,
-                        childAspectRatio: isCompact ? 0.78 : 0.86,
-                      ),
-                      itemCount: rooms.length,
-                      itemBuilder: (BuildContext context, int index) {
-                        Room room = rooms[index];
-
-                        return InkWell(
-                          onTap: () {
-                            openRoom(room);
-                          },
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: getRoomColor(room.status),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(
-                                    Icons.hotel,
-                                    color: Colors.white,
-                                    size: 28,
-                                  ),
-                                  const SizedBox(height: 5),
-                                  FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                      room.cardTitle,
-                                      maxLines: 1,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 19,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  Text(
-                                    room.status,
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-
-                                  if (room.status == "BOOKED" &&
-                                      room.bookingTime != null) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      "STAY : ${room.stayDurationLabel()}",
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    Text(
-                                      "TIME : ${formatTimeRange(room.bookingTime!, room.bookingEndTime)}",
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-
-                                  if (room.futureBooking &&
-                                      room.futureBookingDate != null) ...[
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      "FUTURE • ${formatDate(room.futureBookingDate!)} ${formatTimeRange(room.futureBookingDate!, room.futureBookingEnd)}",
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => HotelDashboardView(
+    hotelName: HotelSettingsStore.hotelName,
+    rooms: rooms,
+    roomsLoading: _roomsLoading,
+    onAction: handleMenuAction,
+    onOpenRoom: openRoom,
+    onEditRoom: (room) => _manageSelectedRoom(room, delete: false),
+    onDeleteRoom: (room) => _manageSelectedRoom(room, delete: true),
+    onSettingsSaved: () {
+      if (mounted) setState(() {});
+    },
+    onRefresh: _refreshHotel,
+    membershipBanner: TrialBanner(onActivated: _reloadAfterCloudApply),
+  );
 }

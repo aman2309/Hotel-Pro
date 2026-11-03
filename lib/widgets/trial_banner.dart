@@ -1,3 +1,4 @@
+import '../theme/custom_colors.dart';
 import 'package:flutter/material.dart';
 
 import '../screens/license_screen.dart';
@@ -21,13 +22,14 @@ class TrialBanner extends StatelessWidget {
         final bool renew = license.cloudView == HotelLicenseView.activated;
         final urgent = license.expired || (!renew && license.daysLeft <= 2);
         return Material(
-          color: urgent ? const Color(0xFFC62828) : const Color(0xFF1565C0),
+          color: urgent ? CustomColors.bookedTint : CustomColors.neutralTint,
           child: InkWell(
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
                   builder: (_) => LicenseScreen(
-                    locked: license.expired ||
+                    locked:
+                        license.expired ||
                         license.cloudView == HotelLicenseView.missing,
                     onActivated: onActivated,
                   ),
@@ -38,22 +40,26 @@ class TrialBanner extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
-                  const Icon(Icons.timer_outlined, color: Colors.white, size: 18),
+                  const Icon(
+                    Icons.timer_outlined,
+                    color: CustomColors.button,
+                    size: 18,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       license.warningLine,
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: CustomColors.button,
                         fontWeight: FontWeight.w800,
                         fontSize: 13,
                       ),
                     ),
                   ),
                   Text(
-                    renew ? 'Renew with PIN' : 'PIN',
+                    renew ? 'Renew with a license key' : 'Activate',
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: CustomColors.button,
                       fontWeight: FontWeight.w900,
                       fontSize: 12,
                     ),

@@ -1,10 +1,8 @@
+import '../theme/custom_colors.dart';
 import 'package:flutter/material.dart';
 
-import '../config/backend_config.dart';
-import '../services/cpanel_sync_service.dart';
 import '../services/hotel_cloud_sync_service.dart';
 import '../services/hotel_photo_storage_service.dart';
-import '../dialogs/hotel_sync_review_dialog.dart';
 
 /// Compact AppBar chip. Does not change dashboard layout.
 class HotelCloudStatusChip extends StatelessWidget {
@@ -24,7 +22,11 @@ class HotelCloudStatusChip extends StatelessWidget {
             photos.hasRestoreFailures ||
                 photos.lastPhotoError != null ||
                 photos.pendingUploadCount > 0
-            ? const _ChipLook('Photos pending', Icons.photo, Color(0xFFEF9A9A))
+            ? const _ChipLook(
+                'Photos pending',
+                Icons.photo_rounded,
+                CustomColors.booked,
+              )
             : _look(sync.status);
         return Tooltip(
           message: sync.lastError ?? photos.lastPhotoError ?? look.label,
@@ -32,40 +34,7 @@ class HotelCloudStatusChip extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 6),
             child: ActionChip(
               onPressed: () {
-                if (hotelUsesCpanel) {
-                  final conflicts = CpanelSyncService.instance.pendingConflicts;
-                  if (conflicts.isNotEmpty) {
-                    showDialog<void>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text('Sync conflict'),
-                        content: const Text(
-                          'This phone and the server both changed a bill or payment. Choose which copy to keep. The hotel is not deleted.',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              CpanelSyncService.instance.useServerCopy();
-                            },
-                            child: const Text('Keep server'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              CpanelSyncService.instance.keepThisPhone();
-                            },
-                            child: const Text('Keep this phone'),
-                          ),
-                        ],
-                      ),
-                    );
-                    return;
-                  }
-                  CpanelSyncService.instance.retry();
-                  return;
-                }
-                showHotelSyncReview(context);
+                HotelCloudSyncService.instance.retry();
               },
               visualDensity: VisualDensity.compact,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -74,12 +43,12 @@ class HotelCloudStatusChip extends StatelessWidget {
               label: Text(
                 look.label,
                 style: TextStyle(
-                  color: Colors.white,
+                  color: CustomColors.button,
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              avatar: Icon(look.icon, size: 14, color: Colors.white),
+              avatar: Icon(look.icon, size: 14, color: CustomColors.button),
             ),
           ),
         );
@@ -90,15 +59,31 @@ class HotelCloudStatusChip extends StatelessWidget {
   _ChipLook _look(HotelCloudStatus status) {
     switch (status) {
       case HotelCloudStatus.synced:
-        return const _ChipLook('Synced', Icons.cloud_done, Color(0xFF81C784));
+        return const _ChipLook(
+          'Synced',
+          Icons.cloud_done_rounded,
+          CustomColors.primary,
+        );
       case HotelCloudStatus.syncing:
       case HotelCloudStatus.migrating:
       case HotelCloudStatus.restoring:
-        return const _ChipLook('Pending', Icons.cloud_sync, Color(0xFF64B5F6));
+        return const _ChipLook(
+          'Pending',
+          Icons.cloud_sync_rounded,
+          CustomColors.primary,
+        );
       case HotelCloudStatus.offline:
-        return const _ChipLook('Pending', Icons.cloud_off, Color(0xFFFFCC80));
+        return const _ChipLook(
+          'Pending',
+          Icons.cloud_off_rounded,
+          CustomColors.gold,
+        );
       case HotelCloudStatus.error:
-        return const _ChipLook('Failed', Icons.cloud_off, Color(0xFFEF9A9A));
+        return const _ChipLook(
+          'Failed',
+          Icons.cloud_off_rounded,
+          CustomColors.booked,
+        );
     }
   }
 }

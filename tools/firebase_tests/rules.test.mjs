@@ -19,7 +19,8 @@ before(async()=>{
       await setDoc(doc(c.firestore(),`users/${uid}`),{businessId:biz,role:'owner',phoneNumber:number});
       await setDoc(doc(c.firestore(),`phoneIndex/${number.slice(1)}`),{businessId:biz,ownerUid:uid,phoneNumber:number});
     }
-    await setDoc(doc(c.firestore(),'businesses/old-hotel/rooms/room_101'),{schemaVersion:3,status:'EMPTY'});
+    await setDoc(doc(c.firestore(),'businesses/old-hotel/floors/ground'),{name:'Ground',schemaVersion:3});
+    await setDoc(doc(c.firestore(),'businesses/old-hotel/rooms/room_101'),{schemaVersion:3,floorId:'ground',status:'EMPTY'});
   });
 });
 after(async()=>{await env?.cleanup();});
@@ -67,7 +68,7 @@ test('user/business/phone mapping created atomically, takeover denied',async()=>
 test('listener on device B receives device A change',async()=>{
   const a=owner().firestore(),b=owner().firestore();let stop;
   const seen=new Promise((resolve,reject)=>{stop=onSnapshot(doc(b,'businesses/old-hotel/rooms/listener-room'),snap=>{if(snap.data()?.guestName==='Shared')resolve();},reject);});
-  await setDoc(doc(a,'businesses/old-hotel/rooms/listener-room'),{schemaVersion:3,guestName:'Shared'});
+  await setDoc(doc(a,'businesses/old-hotel/rooms/listener-room'),{schemaVersion:3,floorId:'ground',guestName:'Shared'});
   const timer=setTimeout(()=>{},10000);
   await seen;clearTimeout(timer);stop();
 });
@@ -76,12 +77,12 @@ async function book(db,id){return runTransaction(db,async tx=>{
   const room=await tx.get(r),payment=await tx.get(p);
   if(payment.exists())return;
   if(room.data()?.status!=='EMPTY')throw Error('conflict');
-  tx.set(r,{schemaVersion:3,status:'BOOKED',operationId:id});
+  tx.set(r,{schemaVersion:3,floorId:'ground',status:'BOOKED',operationId:id});
   tx.set(p,{schemaVersion:3,amount:500,operationId:id});
 });}
 test('concurrent booking/payment has one atomic winner and retry is idempotent',async()=>{
   const a=owner().firestore(),b=owner().firestore();
-  await setDoc(doc(a,'businesses/old-hotel/rooms/concurrent'),{schemaVersion:3,status:'EMPTY'});
+  await setDoc(doc(a,'businesses/old-hotel/rooms/concurrent'),{schemaVersion:3,floorId:'ground',status:'EMPTY'});
   const results=await Promise.allSettled([book(a,'attempt-A'),book(b,'attempt-B')]);
   assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
   const payments=await getDocs(collection(a,'businesses/old-hotel/payments'));assert.equal(payments.size,1);
@@ -90,10 +91,10 @@ test('concurrent booking/payment has one atomic winner and retry is idempotent',
 });
 test('offline write stays pending, reconnect and payment retry commit once',async()=>{
   const db=owner().firestore();
-  await setDoc(doc(db,'businesses/old-hotel/rooms/concurrent'),{schemaVersion:3,status:'EMPTY'});
+  await setDoc(doc(db,'businesses/old-hotel/rooms/concurrent'),{schemaVersion:3,floorId:'ground',status:'EMPTY'});
   await disableNetwork(db);
   let settled=false;
-  const pending=setDoc(doc(db,'businesses/old-hotel/rooms/offline-display'),{schemaVersion:3,status:'EMPTY'}).then(()=>{settled=true;});
+  const pending=setDoc(doc(db,'businesses/old-hotel/rooms/offline-display'),{schemaVersion:3,floorId:'ground',status:'EMPTY'}).then(()=>{settled=true;});
   await new Promise(resolve=>setTimeout(resolve,50));assert.equal(settled,false);
   assert.equal((await getDoc(doc(owner().firestore(),'businesses/old-hotel/rooms/offline-display'))).exists(),false);
   await enableNetwork(db);await pending;
@@ -106,9 +107,10 @@ test('reinstall restores trial/activation; trial reset, revoke and delete denied
   const start=business.dataResetAt??business.createdAt;
   await env.withSecurityRulesDisabled(async c=>{await deleteDoc(doc(c.firestore(),'businesses/old-hotel/settings/license'));});
   await assertFails(setDoc(license,{trialStart:Timestamp.now(),activated:false,pinHash:null}));
-  await assertSucceeds(setDoc(license,{trialStart:start,activated:false,pinHash:null}));
-  await assertFails(setDoc(license,{activated:true,pinHash},{merge:true}));
-  await env.withSecurityRulesDisabled(async c=>{await setDoc(doc(c.firestore(),'businesses/old-hotel/settings/license'),{activated:true,pinHash},{merge:true});});
+  await assertFails(setDoc(license,{trialStart:start,activated:false,pinHash:null}));
+  await env.withSecurityRulesDisabled(async c=>{await setDoc(doc(c.firestore(),'businesses/old-hotel/settings/license'),{trialStart:start,activated:false,pinHash:null});});
+  await assertFails(setDoc(license,{activated:true,pinHash,expiresAt:Timestamp.fromMillis(Date.now()+86400000)},{merge:true}));
+  await env.withSecurityRulesDisabled(async c=>{await setDoc(doc(c.firestore(),'businesses/old-hotel/settings/license'),{activated:true,pinHash,expiresAt:Timestamp.fromMillis(Date.now()+86400000)},{merge:true});});
   const data=(await getDoc(doc(owner().firestore(),'businesses/old-hotel/settings/license'))).data();
   assert.equal(data.activated,true);assert.equal(data.trialStart.toMillis(),start.toMillis());
   await assertFails(setDoc(license,{trialStart:Timestamp.now()},{merge:true}));
@@ -134,16 +136,17 @@ test('older snapshot writers and physical financial deletes are rejected',async(
 test('expired trial preserves reads but blocks hotel writes until server activation',async()=>{
   await env.withSecurityRulesDisabled(async c=>{
     await setDoc(doc(c.firestore(),'businesses/expired-hotel'),{ownerUid:'expired-owner'});
+    await setDoc(doc(c.firestore(),'businesses/expired-hotel/floors/ground'),{name:'Ground',schemaVersion:3});
     await setDoc(doc(c.firestore(),'businesses/expired-hotel/settings/license'),{trialStart:Timestamp.fromMillis(Date.now()-11*86400000),activated:false});
   });
   const db=env.authenticatedContext('expired-owner',{phone_number:'+919999999993'}).firestore();
   const room=doc(db,'businesses/expired-hotel/rooms/room_101');
   await assertSucceeds(getDoc(room));
-  await assertFails(setDoc(room,{schemaVersion:3,status:'EMPTY'}));
+  await assertFails(setDoc(room,{schemaVersion:3,floorId:'ground',status:'EMPTY'}));
   const storage=env.authenticatedContext('expired-owner',{phone_number:'+919999999993'}).storage();
   const photo=ref(storage,`businesses/expired-hotel/guests/test/versions/${'e'.repeat(64)}/id_front.jpg`);
   await assertFails(uploadBytes(photo,new Uint8Array([255,216,255,217]),{contentType:'image/jpeg'}));
-  await env.withSecurityRulesDisabled(async c=>{await setDoc(doc(c.firestore(),'businesses/expired-hotel/settings/license'),{activated:true},{merge:true});});
-  await assertSucceeds(setDoc(room,{schemaVersion:3,status:'EMPTY'}));
+  await env.withSecurityRulesDisabled(async c=>{await setDoc(doc(c.firestore(),'businesses/expired-hotel/settings/license'),{activated:true,expiresAt:Timestamp.fromMillis(Date.now()+86400000)},{merge:true});});
+  await assertSucceeds(setDoc(room,{schemaVersion:3,floorId:'ground',status:'EMPTY'}));
   await assertSucceeds(uploadBytes(photo,new Uint8Array([255,216,255,217]),{contentType:'image/jpeg'}));
 });

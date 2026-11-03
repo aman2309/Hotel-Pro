@@ -72,24 +72,3 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
     implementation("com.google.android.play:integrity:1.4.0")
 }
-
-// This Mac's Xcode EULA is unsigned, so the stock Flutter bash
-// launcher exits 69. Route assemble through the Dart snapshot wrapper.
-val flutterSnapshotWrapper = rootProject.file("../.flutter_wrapper/bin/flutter")
-tasks.configureEach {
-    if (!name.startsWith("compileFlutterBuild")) {
-        return@configureEach
-    }
-    doFirst {
-        val setter =
-            javaClass.methods.firstOrNull { method ->
-                method.name == "setFlutterExecutable" && method.parameterCount == 1
-            }
-        if (setter == null) {
-            throw GradleException(
-                "Cannot override Flutter executable on task $name (${javaClass.name})",
-            )
-        }
-        setter.invoke(this, flutterSnapshotWrapper)
-    }
-}

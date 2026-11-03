@@ -16,3 +16,14 @@ function addOneCalendarYear(date) {
 }
 
 module.exports = {addOneCalendarYear};
+
+/** Add calendar months in UTC, clamping to the target month's last day. */
+function addCalendarMonths(date, months) {
+  if (!Number.isInteger(months) || months < 1 || months > 1200) throw Error('INVALID_DURATION');
+  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(date.getUTCDate(), last));
+  target.setUTCHours(date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds(), date.getUTCMilliseconds());
+  return target;
+}
+module.exports.addCalendarMonths = addCalendarMonths;

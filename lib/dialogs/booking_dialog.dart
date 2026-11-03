@@ -1,3 +1,11 @@
+import '../widgets/date_time_field.dart';
+import '../widgets/app_toast.dart';
+import '../widgets/custom_bottom_sheet.dart';
+import '../widgets/custom_dropdown.dart';
+import '../theme/custom_colors.dart';
+import '../widgets/custom_button.dart';
+import '../widgets/custom_dialog.dart';
+import '../widgets/custom_text_field.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -11,24 +19,27 @@ import '../services/hotel_photo_upload_debug.dart';
 import '../services/id_card_ocr.dart';
 import '../stores/customer_store.dart';
 
-TimeOfDay _quarterHour(TimeOfDay time) {
-  final int total = time.hour * 60 + time.minute;
-  final int rounded = ((total + 7) ~/ 15) * 15;
-  final int mins = rounded % (24 * 60);
-  return TimeOfDay(hour: mins ~/ 60, minute: mins % 60);
-}
-
-Future<bool?> showBookingDialog(BuildContext context, Room room) {
+Future<bool?> showBookingDialog(
+  BuildContext context,
+  Room sourceRoom, {
+  Future<void> Function()? prepareGuests,
+  Future<void> Function(Room draft)? saveBooking,
+}) {
+  final originalRoom = sourceRoom.toJson();
+  final room = Room.fromJson(originalRoom);
+  bool saving = false;
+  String? saveError;
+  String saveStage = 'Saving guest ID photos…';
   final mobileController = TextEditingController();
   final nameController = TextEditingController();
   final idController = TextEditingController();
   final addressController = TextEditingController();
 
   final rentController = TextEditingController(
-    text: room.normalRent.toString(),
+    text: room.normalRent > 0 ? room.normalRent.toString() : '',
   );
 
-  final daysController = TextEditingController();
+  final daysController = TextEditingController(text: '1');
 
   final advanceController = TextEditingController(text: "0");
 
@@ -41,7 +52,6 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
   final backPhotoFocus = FocusNode();
 
   final rentFocus = FocusNode();
-  final dateFocus = FocusNode();
   final daysFocus = FocusNode();
   final advanceFocus = FocusNode();
   final paymentFocus = FocusNode();
@@ -58,7 +68,7 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
   }
 
   DateTime selectedBookingDate = dateOnly(DateTime.now());
-  TimeOfDay fromTime = _quarterHour(TimeOfDay.now());
+  TimeOfDay fromTime = TimeOfDay.now();
   TimeOfDay toTime = const TimeOfDay(hour: 11, minute: 0);
 
   String paymentMode = "Cash";
@@ -92,20 +102,25 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
     return atTime(selectedBookingDate, fromTime);
   }
 
+  int stayDays() {
+    final days = int.tryParse(daysController.text) ?? 1;
+    return days > 0 ? days : 1;
+  }
+
   DateTime selectedToDateTime(int days) {
     return atTime(selectedBookingDate.add(Duration(days: days)), toTime);
   }
 
   Uint8List? photoBytes(String photoData) => hotelPhotoBytes(photoData);
 
-  return showDialog<bool>(
+  return showCustomBottomSheet<bool>(
     context: context,
     barrierDismissible: false,
     builder: (BuildContext bookingContext) {
       return StatefulBuilder(
         builder: (BuildContext dialogContext, StateSetter updateBookingForm) {
           Future<ImageSource?> choosePhotoSource() async {
-            return showModalBottomSheet<ImageSource>(
+            return showCustomBottomSheet<ImageSource>(
               context: dialogContext,
               builder: (BuildContext sheetContext) {
                 return SafeArea(
@@ -113,14 +128,14 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ListTile(
-                        leading: const Icon(Icons.camera_alt),
+                        leading: const Icon(Icons.camera_alt_rounded),
                         title: const Text("Camera"),
                         onTap: () {
                           Navigator.pop(sheetContext, ImageSource.camera);
                         },
                       ),
                       ListTile(
-                        leading: const Icon(Icons.photo_library),
+                        leading: const Icon(Icons.photo_library_rounded),
                         title: const Text("Gallery"),
                         onTap: () {
                           Navigator.pop(sheetContext, ImageSource.gallery);
@@ -146,12 +161,40 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
               return null;
             }
 
-            return imagePicker.pickImage(
-              source: source,
-              imageQuality: 92,
-              maxWidth: 2200,
-              maxHeight: 2200,
-            );
+            try {
+              return await imagePicker.pickImage(
+                source: source,
+                imageQuality: 92,
+                maxWidth: 2200,
+                maxHeight: 2200,
+              );
+            } catch (error) {
+              if (dialogContext.mounted) {
+                showAppToast(
+                  dialogContext,
+                  'Could not open camera or gallery. Check photo permissions and try again.',
+                );
+              }
+              debugPrint('[BOOKING] Photo picker failed: $error');
+              return null;
+            }
+          }
+
+          Future<Uint8List?> readIdPhoto(XFile image) async {
+            try {
+              final bytes = await image.readAsBytes();
+              if (bytes.isEmpty) throw StateError('Empty image');
+              return bytes;
+            } catch (error) {
+              if (dialogContext.mounted) {
+                showAppToast(
+                  dialogContext,
+                  'Could not read this photo. Select it again from camera or gallery.',
+                );
+              }
+              debugPrint('[BOOKING] Photo read failed: $error');
+              return null;
+            }
           }
 
           Future<void> fillFromIdPhoto({
@@ -169,17 +212,15 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
               scan = await IdCardOcr.scanBytes(bytes);
             }
 
-            if (!dialogContext.mounted) {
+            if (!dialogContext.mounted || saving) {
               return;
             }
 
             if (scan.isEmpty) {
-              ScaffoldMessenger.of(dialogContext).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    "Could not read this ID clearly. Take a straight, sharp photo and try again.",
-                  ),
-                ),
+              showAppToast(
+                dialogContext,
+                'Photo selected. Could not auto-read the ID; enter the guest details manually.',
+                error: false,
               );
               return;
             }
@@ -205,10 +246,10 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
             });
 
             if (filled && dialogContext.mounted) {
-              ScaffoldMessenger.of(dialogContext).showSnackBar(
-                const SnackBar(
-                  content: Text("Name / Aadhaar / Address filled from ID photo"),
-                ),
+              showAppToast(
+                dialogContext,
+                'Guest details filled from ID photo.',
+                error: false,
               );
             }
           }
@@ -220,7 +261,8 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
               return;
             }
 
-            final Uint8List bytes = await image.readAsBytes();
+            final Uint8List? bytes = await readIdPhoto(image);
+            if (bytes == null || !dialogContext.mounted || saving) return;
 
             updateBookingForm(() {
               idFrontPhoto = base64Encode(bytes);
@@ -244,7 +286,8 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
               return;
             }
 
-            final Uint8List bytes = await image.readAsBytes();
+            final Uint8List? bytes = await readIdPhoto(image);
+            if (bytes == null || !dialogContext.mounted || saving) return;
 
             updateBookingForm(() {
               idBackPhoto = base64Encode(bytes);
@@ -290,10 +333,10 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
               });
 
               if (!alreadyLookedUp) {
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  SnackBar(
-                    content: Text("Welcome Back ${oldCustomer.guestName}"),
-                  ),
+                showAppToast(
+                  dialogContext,
+                  'Saved guest details loaded.',
+                  error: false,
                 );
               }
 
@@ -309,23 +352,73 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
                 ? today
                 : selectedBookingDate;
 
-            DateTime? pickedDate = await showDatePicker(
+            DateTime? pickedDate = await showCustomDateSheet(
               context: dialogContext,
               initialDate: initialDate,
               firstDate: today,
               lastDate: DateTime(DateTime.now().year + 3),
             );
 
+            if (!dialogContext.mounted) return;
             if (pickedDate != null) {
               updateBookingForm(() {
                 selectedBookingDate = dateOnly(pickedDate);
               });
             }
 
-            daysFocus.requestFocus();
+            FocusScope.of(dialogContext).unfocus();
+          }
+
+          Future<void> selectCheckoutDate() async {
+            final days = stayDays();
+            final first = selectedBookingDate.add(const Duration(days: 1));
+            final picked = await showCustomDateSheet(
+              context: dialogContext,
+              initialDate: selectedBookingDate.add(Duration(days: days)),
+              firstDate: first,
+              lastDate: selectedBookingDate.add(
+                Duration(days: days > 1095 ? days : 1095),
+              ),
+            );
+            if (picked != null && dialogContext.mounted) {
+              updateBookingForm(
+                () => daysController.text = picked
+                    .difference(selectedBookingDate)
+                    .inDays
+                    .toString(),
+              );
+            }
+          }
+
+          Future<void> pickTime(bool checkin) async {
+            final picked = await showCustomTimeSheet(
+              context: dialogContext,
+              initialTime: checkin ? fromTime : toTime,
+              title: checkin ? 'Check-in time' : 'Check-out time',
+            );
+            if (picked != null && dialogContext.mounted) {
+              updateBookingForm(() {
+                if (checkin) {
+                  fromTime = picked;
+                } else {
+                  toTime = picked;
+                }
+              });
+            }
+          }
+
+          void bookingError(String message) {
+            if (!dialogContext.mounted) return;
+            updateBookingForm(() => saveError = message);
+            showAppToast(dialogContext, message);
+            debugPrint('[BOOKING] Save blocked: $message');
           }
 
           Future<void> confirmBooking() async {
+            if (saving) return;
+            hideAppToast();
+            room.copyFrom(Room.fromJson(originalRoom));
+            updateBookingForm(() => saveError = null);
             String mobile = mobileController.text.trim();
 
             String guestName = nameController.text.trim();
@@ -340,34 +433,36 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
 
             int advance = int.tryParse(advanceController.text) ?? 0;
 
-            if (mobile.isEmpty ||
-                guestName.isEmpty ||
-                idNumber.isEmpty ||
-                bookingRate <= 0 ||
-                days <= 0) {
-              ScaffoldMessenger.of(dialogContext).showSnackBar(
-                const SnackBar(
-                  content: Text("Please fill all required fields"),
-                ),
-              );
-
+            String? invalid;
+            if (CustomerStore.normalizedMobile(mobile).length != 10) {
+              invalid = 'Enter a valid 10-digit guest mobile number.';
+            } else if (guestName.isEmpty) {
+              invalid = 'Enter the guest name.';
+            } else if (idNumber.isEmpty) {
+              invalid = 'Enter the guest ID number.';
+            } else if (bookingRate <= 0) {
+              invalid = 'Enter a room rent greater than zero.';
+            } else if (days <= 0) {
+              invalid = 'Enter a valid number of days.';
+            } else if (int.tryParse(advanceController.text.trim()) == null ||
+                advance < 0) {
+              invalid = 'Enter a valid advance amount (zero or more).';
+            } else if (photoBytes(idFrontPhoto) == null ||
+                photoBytes(idBackPhoto) == null) {
+              invalid = 'Select both front and back ID photos.';
+            }
+            if (invalid != null) {
+              bookingError(invalid);
               return;
             }
 
-            if (idFrontPhoto.isEmpty || idBackPhoto.isEmpty) {
-              ScaffoldMessenger.of(dialogContext).showSnackBar(
-                const SnackBar(
-                  content: Text("Please select ID Front and Back Photo"),
-                ),
-              );
-
-              return;
-            }
-
-            HotelPhotoUploadDebug.stage('1 Booking/customer save triggered', <String, Object?>{
-              'roomNumber': room.roomNumber,
-              'futureBooking': room.status == 'BOOKED',
-            });
+            HotelPhotoUploadDebug.stage(
+              '1 Booking/customer save triggered',
+              <String, Object?>{
+                'roomNumber': room.roomNumber,
+                'futureBooking': !isToday(selectedBookingDate),
+              },
+            );
             HotelPhotoUploadDebug.stage(
               '2 Front photo exists locally',
               HotelPhotoUploadDebug.photoPresence(idFrontPhoto),
@@ -378,6 +473,7 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
             );
 
             final List<Map<String, dynamic>> extraGuests = [];
+            final seenMobiles = {CustomerStore.normalizedMobile(mobile)};
 
             for (final guest in extraGuestControllers) {
               final String guestMobile =
@@ -397,22 +493,34 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
 
               final String guestBackPhoto = guest["backPhoto"] as String;
 
-              if (guestMobile.isEmpty ||
+              if ([
+                guestMobile,
+                guestName,
+                guestIdNumber,
+                guestAddress,
+                guestFrontPhoto,
+                guestBackPhoto,
+              ].every((value) => value.isEmpty)) {
+                continue;
+              }
+              if (CustomerStore.normalizedMobile(guestMobile).length != 10 ||
                   guestName.isEmpty ||
                   guestIdNumber.isEmpty ||
-                  guestFrontPhoto.isEmpty ||
-                  guestBackPhoto.isEmpty) {
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      "Please complete all Additional Guest details and ID Photos",
-                    ),
-                  ),
+                  photoBytes(guestFrontPhoto) == null ||
+                  photoBytes(guestBackPhoto) == null) {
+                bookingError(
+                  'Complete additional guest details and both ID photos, or remove the unused guest.',
                 );
 
                 return;
               }
 
+              if (!seenMobiles.add(
+                CustomerStore.normalizedMobile(guestMobile),
+              )) {
+                bookingError('Each guest must have a different mobile number.');
+                return;
+              }
               extraGuests.add({
                 "mobile": guestMobile,
                 "name": guestName,
@@ -423,26 +531,15 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
               });
             }
 
-            debugPrint("EXTRA GUEST COUNT = ${extraGuests.length}");
-
-            debugPrint("EXTRA GUEST DATA = $extraGuests");
-
             if (isToday(selectedBookingDate)) {
               if (room.futureBooking && room.futureBookingDate != null) {
-                DateTime stayCheckoutDate = dateOnly(selectedBookingDate).add(
-                  Duration(days: days),
-                );
+                DateTime stayCheckoutDate = selectedToDateTime(days);
 
-                DateTime futureDate = dateOnly(room.futureBookingDate!);
+                DateTime futureDate = room.futureBookingDate!;
 
-                if (!stayCheckoutDate.isBefore(futureDate)) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        "ROOM NOT AVAILABLE - Future Booking on "
-                        "${formatDate(futureDate)}",
-                      ),
-                    ),
+                if (stayCheckoutDate.isAfter(futureDate)) {
+                  bookingError(
+                    'This stay overlaps the existing future booking on ${formatDate(futureDate)}. Choose an earlier checkout.',
                   );
 
                   return;
@@ -468,11 +565,7 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
               room.status = "BOOKED";
             } else {
               if (room.futureBooking) {
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  const SnackBar(
-                    content: Text("This room already has a Future Booking"),
-                  ),
-                );
+                bookingError('This room already has a future booking.');
 
                 return;
               }
@@ -492,47 +585,63 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
               room.futureBooking = true;
             }
 
-            await CustomerStore.saveCustomer(
-              Customer(
-                mobile: mobile,
-                guestName: guestName,
-                address: guestAddress,
-                idType: "Aadhaar / Other ID",
-                idNumber: idNumber,
-                idFrontPhotoPath: idFrontPhoto,
-                idBackPhotoPath: idBackPhoto,
-              ),
-            );
-
-            for (final guest in extraGuests) {
-              final String extraMobile = guest["mobile"] as String;
-
+            updateBookingForm(() {
+              saving = true;
+              saveStage = 'Saving guest ID photos…';
+            });
+            FocusScope.of(dialogContext).unfocus();
+            try {
               await CustomerStore.saveCustomer(
                 Customer(
-                  mobile: extraMobile,
-                  guestName: guest["name"] as String,
-                  address: guest["address"] as String? ?? "",
+                  mobile: mobile,
+                  guestName: guestName,
+                  address: guestAddress,
                   idType: "Aadhaar / Other ID",
-                  idNumber: guest["idNumber"] as String,
-                  idFrontPhotoPath: guest["idFrontPhoto"] as String,
-                  idBackPhotoPath: guest["idBackPhoto"] as String,
+                  idNumber: idNumber,
+                  idFrontPhotoPath: idFrontPhoto,
+                  idBackPhotoPath: idBackPhoto,
                 ),
               );
 
-              final Customer? savedExtraCustomer = CustomerStore.findByMobile(
-                extraMobile,
-              );
+              for (final guest in extraGuests) {
+                final String extraMobile = guest["mobile"] as String;
 
-              debugPrint(
-                "EXTRA CUSTOMER SAVED = "
-                "${savedExtraCustomer?.customerId} | "
-                "${savedExtraCustomer?.mobile} | "
-                "${savedExtraCustomer?.guestName}",
-              );
-            }
-
-            if (dialogContext.mounted) {
-              Navigator.pop(dialogContext, true);
+                await CustomerStore.saveCustomer(
+                  Customer(
+                    mobile: extraMobile,
+                    guestName: guest["name"] as String,
+                    address: guest["address"] as String? ?? "",
+                    idType: "Aadhaar / Other ID",
+                    idNumber: guest["idNumber"] as String,
+                    idFrontPhotoPath: guest["idFrontPhoto"] as String,
+                    idBackPhotoPath: guest["idBackPhoto"] as String,
+                  ),
+                );
+              }
+              await prepareGuests?.call();
+              if (!dialogContext.mounted) return;
+              updateBookingForm(() => saveStage = 'Saving booking…');
+              if (saveBooking != null) {
+                await saveBooking(room);
+              } else {
+                sourceRoom.copyFrom(room);
+              }
+              if (dialogContext.mounted) {
+                Navigator.pop(dialogContext, true);
+              }
+            } catch (error) {
+              if (dialogContext.mounted) {
+                bookingError(
+                  error is StateError
+                      ? error.message.toString()
+                      : 'Could not save booking. Check your connection and retry.',
+                );
+                debugPrint('[BOOKING] Save failed: $error');
+              }
+            } finally {
+              if (dialogContext.mounted) {
+                updateBookingForm(() => saving = false);
+              }
             }
           }
 
@@ -557,7 +666,7 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
 
                   return KeyEventResult.ignored;
                 },
-                child: OutlinedButton(
+                child: CustomButton.outline(
                   onPressed: onPressed,
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.all(6),
@@ -569,12 +678,12 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
                         ? Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.add_a_photo, size: 30),
+                              const Icon(Icons.add_a_photo_rounded, size: 30),
                               const SizedBox(height: 5),
                               Text(title, textAlign: TextAlign.center),
                               const SizedBox(height: 3),
                               const Text(
-                                "CAMERA / GALLERY",
+                                "Camera / gallery",
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
@@ -594,12 +703,12 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
                                 child: Container(
                                   width: double.infinity,
                                   padding: const EdgeInsets.all(4),
-                                  color: Colors.black54,
+                                  color: CustomColors.muted,
                                   child: Text(
                                     title,
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
-                                      color: Colors.white,
+                                      color: CustomColors.surface,
                                       fontSize: 10,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -614,584 +723,607 @@ Future<bool?> showBookingDialog(BuildContext context, Room room) {
             );
           }
 
-          return AlertDialog(
-            title: Text("Book Room ${room.roomNumber}"),
-            content: SizedBox(
-              width: 520,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: mobileController,
-                      focusNode: mobileFocus,
-                      autofocus: true,
-                      keyboardType: TextInputType.phone,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: "Mobile Number *",
-                        prefixIcon: Icon(Icons.phone),
+          return PopScope(
+            canPop: !saving,
+            child: CustomDialog(
+              canClose: !saving,
+              notice: saveError == null
+                  ? null
+                  : Text(
+                      saveError!,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: CustomColors.error,
                       ),
-                      onChanged: (value) {
-                        if (CustomerStore.normalizedMobile(value).length >= 10) {
-                          searchCustomer();
-                        }
-                      },
-                      onSubmitted: (value) {
-                        searchCustomer();
-                      },
                     ),
-
-                    TextField(
-                      controller: nameController,
-                      focusNode: nameFocus,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: "Guest Name *",
-                        prefixIcon: Icon(Icons.person),
-                      ),
-                      onSubmitted: (value) {
-                        idFocus.requestFocus();
-                      },
-                    ),
-
-                    TextField(
-                      controller: idController,
-                      focusNode: idFocus,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: "Aadhaar / Other ID Number *",
-                        prefixIcon: Icon(Icons.badge),
-                      ),
-                      onSubmitted: (value) {
-                        addressFocus.requestFocus();
-                      },
-                    ),
-
-                    TextField(
-                      controller: addressController,
-                      focusNode: addressFocus,
-                      minLines: 2,
-                      maxLines: 3,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: "Address",
-                        prefixIcon: Icon(Icons.home_outlined),
-                      ),
-                      onSubmitted: (value) {
-                        frontPhotoFocus.requestFocus();
-                      },
-                    ),
-
-                    const SizedBox(height: 15),
-
-                    Row(
+              title: Text("Book Room ${room.roomNumber}"),
+              content: AbsorbPointer(
+                absorbing: saving,
+                child: SizedBox(
+                  width: 520,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        photoButton(
-                          title: "ID FRONT PHOTO",
-                          photoData: idFrontPhoto,
-                          focusNode: frontPhotoFocus,
-                          onPressed: pickFrontPhoto,
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Text(
+                            isToday(selectedBookingDate)
+                                ? 'Check-in today'
+                                : 'Future booking · ${formatDate(selectedBookingDate)}',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
                         ),
-                        const SizedBox(width: 10),
-                        photoButton(
-                          title: "ID BACK PHOTO",
-                          photoData: idBackPhoto,
-                          focusNode: backPhotoFocus,
-                          onPressed: pickBackPhoto,
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          final mobileFocus = FocusNode();
-                          final nameFocus = FocusNode();
-                          final idFocus = FocusNode();
-                          final addressFocus = FocusNode();
-                          final frontFocus = FocusNode();
-                          final backFocus = FocusNode();
-
-                          updateBookingForm(() {
-                            extraGuestControllers.add({
-                              "mobile": TextEditingController(),
-                              "name": TextEditingController(),
-                              "idNumber": TextEditingController(),
-                              "address": TextEditingController(),
-                              "mobileFocus": mobileFocus,
-                              "nameFocus": nameFocus,
-                              "idFocus": idFocus,
-                              "addressFocus": addressFocus,
-                              "frontFocus": frontFocus,
-                              "backFocus": backFocus,
-                              "frontPhoto": "",
-                              "backPhoto": "",
-                            });
-                          });
-
-                          Future.delayed(const Duration(milliseconds: 100), () {
-                            mobileFocus.requestFocus();
-                          });
-                        },
-                        icon: const Icon(Icons.person_add, size: 18),
-                        label: const Text("ADD GUEST"),
-                      ),
-                    ),
-
-                    ...extraGuestControllers.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final guest = entry.value;
-
-                      Future<void> searchExtraCustomer() async {
-                        final mobile = CustomerStore.normalizedMobile(
-                          (guest["mobile"] as TextEditingController).text,
-                        );
-
-                        if (mobile.length < 10) {
-                          (guest["nameFocus"] as FocusNode).requestFocus();
-                          return;
-                        }
-
-                        final String last =
-                            guest["lookedUp"] as String? ?? "";
-                        final bool alreadyLookedUp = last == mobile;
-                        guest["lookedUp"] = mobile;
-
-                        final oldCustomer = CustomerStore.findByMobile(mobile);
-
-                        if (oldCustomer != null) {
-                          updateBookingForm(() {
-                            (guest["name"] as TextEditingController).text =
-                                oldCustomer.guestName;
-
-                            (guest["idNumber"] as TextEditingController).text =
-                                oldCustomer.idNumber;
-
-                            (guest["address"] as TextEditingController).text =
-                                oldCustomer.address;
-
-                            if ((guest["frontPhoto"] as String).isEmpty) {
-                              guest["frontPhoto"] =
-                                  oldCustomer.idFrontPhotoPath;
-                            }
-
-                            if ((guest["backPhoto"] as String).isEmpty) {
-                              guest["backPhoto"] = oldCustomer.idBackPhotoPath;
-                            }
-                          });
-
-                          if (!alreadyLookedUp) {
-                            ScaffoldMessenger.of(dialogContext).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  "Welcome Back ${oldCustomer.guestName} - ${oldCustomer.customerId}",
-                                ),
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Padding(
+                            padding: EdgeInsets.only(bottom: 16),
+                            child: Text(
+                              'Guest details',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
                               ),
+                            ),
+                          ),
+                        ),
+                        CustomTextField(
+                          controller: mobileController,
+                          focusNode: mobileFocus,
+                          autofocus: true,
+                          keyboardType: TextInputType.phone,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: "Mobile Number *",
+                            prefixIcon: Icon(Icons.phone_rounded),
+                          ),
+                          onChanged: (value) {
+                            if (CustomerStore.normalizedMobile(value).length >=
+                                10) {
+                              searchCustomer();
+                            }
+                          },
+                          onSubmitted: (value) {
+                            searchCustomer();
+                          },
+                        ),
+
+                        CustomTextField(
+                          controller: nameController,
+                          focusNode: nameFocus,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: "Guest Name *",
+                            prefixIcon: Icon(Icons.person_rounded),
+                          ),
+                          onSubmitted: (value) {
+                            idFocus.requestFocus();
+                          },
+                        ),
+
+                        CustomTextField(
+                          controller: idController,
+                          focusNode: idFocus,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: "Aadhaar / Other ID Number *",
+                            prefixIcon: Icon(Icons.badge_rounded),
+                          ),
+                          onSubmitted: (value) {
+                            addressFocus.requestFocus();
+                          },
+                        ),
+
+                        CustomTextField(
+                          controller: addressController,
+                          focusNode: addressFocus,
+                          minLines: 2,
+                          maxLines: 3,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: "Address",
+                            prefixIcon: Icon(Icons.home_outlined),
+                          ),
+                          onSubmitted: (value) {
+                            frontPhotoFocus.requestFocus();
+                          },
+                        ),
+
+                        const SizedBox(height: 15),
+
+                        Row(
+                          children: [
+                            photoButton(
+                              title: "ID FRONT PHOTO",
+                              photoData: idFrontPhoto,
+                              focusNode: frontPhotoFocus,
+                              onPressed: pickFrontPhoto,
+                            ),
+                            const SizedBox(width: 10),
+                            photoButton(
+                              title: "ID BACK PHOTO",
+                              photoData: idBackPhoto,
+                              focusNode: backPhotoFocus,
+                              onPressed: pickBackPhoto,
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: CustomButton.outlineIcon(
+                            onPressed: () {
+                              final mobileFocus = FocusNode();
+                              final nameFocus = FocusNode();
+                              final idFocus = FocusNode();
+                              final addressFocus = FocusNode();
+                              final frontFocus = FocusNode();
+                              final backFocus = FocusNode();
+
+                              updateBookingForm(() {
+                                extraGuestControllers.add({
+                                  "mobile": TextEditingController(),
+                                  "name": TextEditingController(),
+                                  "idNumber": TextEditingController(),
+                                  "address": TextEditingController(),
+                                  "mobileFocus": mobileFocus,
+                                  "nameFocus": nameFocus,
+                                  "idFocus": idFocus,
+                                  "addressFocus": addressFocus,
+                                  "frontFocus": frontFocus,
+                                  "backFocus": backFocus,
+                                  "frontPhoto": "",
+                                  "backPhoto": "",
+                                });
+                              });
+
+                              Future.delayed(
+                                const Duration(milliseconds: 100),
+                                () {
+                                  mobileFocus.requestFocus();
+                                },
+                              );
+                            },
+                            icon: const Icon(
+                              Icons.person_add_rounded,
+                              size: 18,
+                            ),
+                            label: const Text("Add guest"),
+                          ),
+                        ),
+
+                        ...extraGuestControllers.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final guest = entry.value;
+
+                          Future<void> searchExtraCustomer() async {
+                            final mobile = CustomerStore.normalizedMobile(
+                              (guest["mobile"] as TextEditingController).text,
                             );
+
+                            if (mobile.length < 10) {
+                              (guest["nameFocus"] as FocusNode).requestFocus();
+                              return;
+                            }
+
+                            final String last =
+                                guest["lookedUp"] as String? ?? "";
+                            final bool alreadyLookedUp = last == mobile;
+                            guest["lookedUp"] = mobile;
+
+                            final oldCustomer = CustomerStore.findByMobile(
+                              mobile,
+                            );
+
+                            if (oldCustomer != null) {
+                              updateBookingForm(() {
+                                (guest["name"] as TextEditingController).text =
+                                    oldCustomer.guestName;
+
+                                (guest["idNumber"] as TextEditingController)
+                                        .text =
+                                    oldCustomer.idNumber;
+
+                                (guest["address"] as TextEditingController)
+                                        .text =
+                                    oldCustomer.address;
+
+                                if ((guest["frontPhoto"] as String).isEmpty) {
+                                  guest["frontPhoto"] =
+                                      oldCustomer.idFrontPhotoPath;
+                                }
+
+                                if ((guest["backPhoto"] as String).isEmpty) {
+                                  guest["backPhoto"] =
+                                      oldCustomer.idBackPhotoPath;
+                                }
+                              });
+
+                              if (!alreadyLookedUp) {
+                                showAppToast(
+                                  dialogContext,
+                                  'Saved guest details loaded.',
+                                  error: false,
+                                );
+                              }
+
+                              (guest["idFocus"] as FocusNode).requestFocus();
+                            } else if (!alreadyLookedUp) {
+                              (guest["nameFocus"] as FocusNode).requestFocus();
+                            }
                           }
 
-                          (guest["idFocus"] as FocusNode).requestFocus();
-                        } else if (!alreadyLookedUp) {
-                          (guest["nameFocus"] as FocusNode).requestFocus();
-                        }
-                      }
+                          Future<void> pickExtraFrontPhoto() async {
+                            final XFile? image = await pickIdPhoto();
 
-                      Future<void> pickExtraFrontPhoto() async {
-                        final XFile? image = await pickIdPhoto();
+                            if (image == null) {
+                              return;
+                            }
 
-                        if (image == null) {
-                          return;
-                        }
+                            final Uint8List? bytes = await readIdPhoto(image);
+                            if (bytes == null ||
+                                !dialogContext.mounted ||
+                                saving) {
+                              return;
+                            }
 
-                        final Uint8List bytes = await image.readAsBytes();
+                            updateBookingForm(() {
+                              guest["frontPhoto"] = base64Encode(bytes);
+                            });
 
-                        updateBookingForm(() {
-                          guest["frontPhoto"] = base64Encode(bytes);
-                        });
+                            await fillFromIdPhoto(
+                              path: image.path,
+                              bytes: bytes,
+                              nameField: guest["name"] as TextEditingController,
+                              idField:
+                                  guest["idNumber"] as TextEditingController,
+                              addressField:
+                                  guest["address"] as TextEditingController,
+                            );
 
-                        await fillFromIdPhoto(
-                          path: image.path,
-                          bytes: bytes,
-                          nameField: guest["name"] as TextEditingController,
-                          idField: guest["idNumber"] as TextEditingController,
-                          addressField:
-                              guest["address"] as TextEditingController,
-                        );
+                            (guest["backFocus"] as FocusNode).requestFocus();
+                          }
 
-                        (guest["backFocus"] as FocusNode).requestFocus();
-                      }
+                          Future<void> pickExtraBackPhoto() async {
+                            final XFile? image = await pickIdPhoto();
 
-                      Future<void> pickExtraBackPhoto() async {
-                        final XFile? image = await pickIdPhoto();
+                            if (image == null) {
+                              return;
+                            }
 
-                        if (image == null) {
-                          return;
-                        }
+                            final Uint8List? bytes = await readIdPhoto(image);
+                            if (bytes == null ||
+                                !dialogContext.mounted ||
+                                saving) {
+                              return;
+                            }
 
-                        final Uint8List bytes = await image.readAsBytes();
+                            updateBookingForm(() {
+                              guest["backPhoto"] = base64Encode(bytes);
+                            });
 
-                        updateBookingForm(() {
-                          guest["backPhoto"] = base64Encode(bytes);
-                        });
+                            await fillFromIdPhoto(
+                              path: image.path,
+                              bytes: bytes,
+                              nameField: guest["name"] as TextEditingController,
+                              idField:
+                                  guest["idNumber"] as TextEditingController,
+                              addressField:
+                                  guest["address"] as TextEditingController,
+                            );
 
-                        await fillFromIdPhoto(
-                          path: image.path,
-                          bytes: bytes,
-                          nameField: guest["name"] as TextEditingController,
-                          idField: guest["idNumber"] as TextEditingController,
-                          addressField:
-                              guest["address"] as TextEditingController,
-                        );
+                            if (index < extraGuestControllers.length - 1) {
+                              final nextGuest =
+                                  extraGuestControllers[index + 1];
 
-                        if (index < extraGuestControllers.length - 1) {
-                          final nextGuest = extraGuestControllers[index + 1];
+                              (nextGuest["mobileFocus"] as FocusNode)
+                                  .requestFocus();
+                            } else {
+                              rentFocus.requestFocus();
+                            }
+                          }
 
-                          (nextGuest["mobileFocus"] as FocusNode)
-                              .requestFocus();
-                        } else {
-                          rentFocus.requestFocus();
-                        }
-                      }
-
-                      return Card(
-                        margin: const EdgeInsets.only(top: 10),
-                        child: Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: Column(
-                            children: [
-                              Row(
+                          return Card(
+                            margin: const EdgeInsets.only(top: 10),
+                            child: Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Column(
                                 children: [
-                                  Expanded(
-                                    child: Text(
-                                      "GUEST ${index + 2}",
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          "GUEST ${index + 2}",
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                       ),
+                                      IconButton(
+                                        tooltip: "REMOVE GUEST",
+                                        onPressed: () {
+                                          updateBookingForm(() {
+                                            extraGuestControllers.removeAt(
+                                              index,
+                                            );
+                                          });
+                                        },
+                                        icon: const Icon(
+                                          Icons.delete_outline_rounded,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  CustomTextField(
+                                    controller: guest["mobile"],
+                                    focusNode: guest["mobileFocus"],
+                                    keyboardType: TextInputType.phone,
+                                    textInputAction: TextInputAction.next,
+                                    decoration: const InputDecoration(
+                                      labelText: "Mobile Number",
+                                      prefixIcon: Icon(Icons.phone_rounded),
                                     ),
-                                  ),
-                                  IconButton(
-                                    tooltip: "REMOVE GUEST",
-                                    onPressed: () {
-                                      updateBookingForm(() {
-                                        extraGuestControllers.removeAt(index);
-                                      });
+                                    onChanged: (value) {
+                                      if (CustomerStore.normalizedMobile(
+                                            value,
+                                          ).length >=
+                                          10) {
+                                        searchExtraCustomer();
+                                      }
                                     },
-                                    icon: const Icon(Icons.delete_outline),
+                                    onSubmitted: (value) {
+                                      searchExtraCustomer();
+                                    },
+                                  ),
+                                  CustomTextField(
+                                    controller: guest["name"],
+                                    focusNode: guest["nameFocus"],
+                                    textInputAction: TextInputAction.next,
+                                    decoration: const InputDecoration(
+                                      labelText: "Guest Name",
+                                      prefixIcon: Icon(Icons.person_rounded),
+                                    ),
+                                    onSubmitted: (value) {
+                                      (guest["idFocus"] as FocusNode)
+                                          .requestFocus();
+                                    },
+                                  ),
+                                  CustomTextField(
+                                    controller: guest["idNumber"],
+                                    focusNode: guest["idFocus"],
+                                    textInputAction: TextInputAction.next,
+                                    decoration: const InputDecoration(
+                                      labelText: "Aadhaar / Other ID Number",
+                                      prefixIcon: Icon(Icons.badge_rounded),
+                                    ),
+                                    onSubmitted: (value) {
+                                      (guest["addressFocus"] as FocusNode)
+                                          .requestFocus();
+                                    },
+                                  ),
+                                  CustomTextField(
+                                    controller: guest["address"],
+                                    focusNode: guest["addressFocus"],
+                                    minLines: 2,
+                                    maxLines: 3,
+                                    textInputAction: TextInputAction.next,
+                                    decoration: const InputDecoration(
+                                      labelText: "Address",
+                                      prefixIcon: Icon(Icons.home_outlined),
+                                    ),
+                                    onSubmitted: (value) {
+                                      (guest["frontFocus"] as FocusNode)
+                                          .requestFocus();
+                                    },
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      photoButton(
+                                        title: "ID FRONT PHOTO",
+                                        photoData:
+                                            guest["frontPhoto"] as String,
+                                        focusNode:
+                                            guest["frontFocus"] as FocusNode,
+                                        onPressed: pickExtraFrontPhoto,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      photoButton(
+                                        title: "ID BACK PHOTO",
+                                        photoData: guest["backPhoto"] as String,
+                                        focusNode:
+                                            guest["backFocus"] as FocusNode,
+                                        onPressed: pickExtraBackPhoto,
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
-                              TextField(
-                                controller: guest["mobile"],
-                                focusNode: guest["mobileFocus"],
-                                keyboardType: TextInputType.phone,
-                                textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: "Mobile Number",
-                                  prefixIcon: Icon(Icons.phone),
-                                ),
-                                onChanged: (value) {
-                                  if (CustomerStore.normalizedMobile(
-                                        value,
-                                      ).length >=
-                                      10) {
-                                    searchExtraCustomer();
-                                  }
-                                },
-                                onSubmitted: (value) {
-                                  searchExtraCustomer();
-                                },
+                            ),
+                          );
+                        }),
+
+                        const SizedBox(height: 15),
+
+                        CustomTextField(
+                          controller: rentController,
+                          focusNode: rentFocus,
+                          keyboardType: TextInputType.number,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: "Room Rent Per Day *",
+                            prefixIcon: Icon(Icons.currency_rupee_rounded),
+                          ),
+                          onSubmitted: (value) {
+                            selectBookingDate();
+                          },
+                        ),
+
+                        const SizedBox(height: 8),
+
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Padding(
+                            padding: EdgeInsets.only(bottom: 14),
+                            child: Text(
+                              'Stay dates & times',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
                               ),
-                              TextField(
-                                controller: guest["name"],
-                                focusNode: guest["nameFocus"],
-                                textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: "Guest Name",
-                                  prefixIcon: Icon(Icons.person),
-                                ),
-                                onSubmitted: (value) {
-                                  (guest["idFocus"] as FocusNode)
-                                      .requestFocus();
-                                },
-                              ),
-                              TextField(
-                                controller: guest["idNumber"],
-                                focusNode: guest["idFocus"],
-                                textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: "Aadhaar / Other ID Number",
-                                  prefixIcon: Icon(Icons.badge),
-                                ),
-                                onSubmitted: (value) {
-                                  (guest["addressFocus"] as FocusNode)
-                                      .requestFocus();
-                                },
-                              ),
-                              TextField(
-                                controller: guest["address"],
-                                focusNode: guest["addressFocus"],
-                                minLines: 2,
-                                maxLines: 3,
-                                textInputAction: TextInputAction.next,
-                                decoration: const InputDecoration(
-                                  labelText: "Address",
-                                  prefixIcon: Icon(Icons.home_outlined),
-                                ),
-                                onSubmitted: (value) {
-                                  (guest["frontFocus"] as FocusNode)
-                                      .requestFocus();
-                                },
-                              ),
-                              const SizedBox(height: 10),
-                              Row(
-                                children: [
-                                  photoButton(
-                                    title: "ID FRONT PHOTO",
-                                    photoData: guest["frontPhoto"] as String,
-                                    focusNode: guest["frontFocus"] as FocusNode,
-                                    onPressed: pickExtraFrontPhoto,
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Wrap(
+                            spacing: 8,
+                            children: [
+                              ActionChip(
+                                label: const Text('Today'),
+                                onPressed: () => updateBookingForm(
+                                  () => selectedBookingDate = dateOnly(
+                                    DateTime.now(),
                                   ),
-                                  const SizedBox(width: 10),
-                                  photoButton(
-                                    title: "ID BACK PHOTO",
-                                    photoData: guest["backPhoto"] as String,
-                                    focusNode: guest["backFocus"] as FocusNode,
-                                    onPressed: pickExtraBackPhoto,
+                                ),
+                              ),
+                              ActionChip(
+                                label: const Text('Tomorrow'),
+                                onPressed: () => updateBookingForm(
+                                  () => selectedBookingDate = dateOnly(
+                                    DateTime.now().add(const Duration(days: 1)),
                                   ),
-                                ],
+                                ),
                               ),
                             ],
                           ),
                         ),
-                      );
-                    }),
+                        const SizedBox(height: 14),
+                        DateTimeField(
+                          label: 'Check-in date',
+                          value: formatDate(selectedBookingDate),
+                          icon: Icons.calendar_month_rounded,
+                          onTap: selectBookingDate,
+                        ),
+                        DateTimeField(
+                          label: 'Check-in time',
+                          value: formatTimeOfDay(fromTime),
+                          icon: Icons.login_rounded,
+                          onTap: () => pickTime(true),
+                        ),
+                        DateTimeField(
+                          label: 'Check-out date',
+                          value: formatDate(
+                            selectedBookingDate.add(Duration(days: stayDays())),
+                          ),
+                          icon: Icons.event_available_rounded,
+                          onTap: selectCheckoutDate,
+                        ),
+                        DateTimeField(
+                          label: 'Check-out time',
+                          value: formatTimeOfDay(toTime),
+                          icon: Icons.logout_rounded,
+                          onTap: () => pickTime(false),
+                        ),
+                        CustomTextField(
+                          controller: daysController,
+                          onChanged: (_) => updateBookingForm(() {}),
+                          focusNode: daysFocus,
+                          keyboardType: TextInputType.number,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: "Number of Days *",
+                            prefixIcon: Icon(Icons.nights_stay_rounded),
+                          ),
+                          onSubmitted: (value) {
+                            advanceFocus.requestFocus();
+                          },
+                        ),
 
-                    const SizedBox(height: 15),
+                        CustomTextField(
+                          controller: advanceController,
+                          focusNode: advanceFocus,
+                          keyboardType: TextInputType.number,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: "Advance Payment",
+                            prefixIcon: Icon(Icons.payments_rounded),
+                          ),
+                          onSubmitted: (value) {
+                            paymentFocus.requestFocus();
+                          },
+                        ),
 
-                    TextField(
-                      controller: rentController,
-                      focusNode: rentFocus,
-                      keyboardType: TextInputType.number,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: "Room Rent Per Day *",
-                        prefixIcon: Icon(Icons.currency_rupee),
-                      ),
-                      onSubmitted: (value) {
-                        dateFocus.requestFocus();
-                      },
-                    ),
+                        const SizedBox(height: 15),
 
-                    const SizedBox(height: 8),
+                        CustomDropdown<String>(
+                          focusNode: paymentFocus,
+                          initialValue: paymentMode,
+                          decoration: const InputDecoration(
+                            labelText: "Payment Mode",
+                            prefixIcon: Icon(Icons.payment_rounded),
+                            border: OutlineInputBorder(),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: "Cash",
+                              child: Text("Cash"),
+                            ),
+                            DropdownMenuItem(value: "UPI", child: Text("UPI")),
+                            DropdownMenuItem(
+                              value: "Card",
+                              child: Text("Card"),
+                            ),
+                            DropdownMenuItem(
+                              value: "Bank Transfer",
+                              child: Text("Bank Transfer"),
+                            ),
+                          ],
+                          onChanged: (String? value) {
+                            if (value != null) {
+                              paymentMode = value;
 
-                    Focus(
-                      focusNode: dateFocus,
-                      onKeyEvent: (FocusNode node, KeyEvent event) {
-                        if (event is KeyDownEvent &&
-                            event.logicalKey == LogicalKeyboardKey.enter) {
-                          daysFocus.requestFocus();
-
-                          return KeyEventResult.handled;
-                        }
-
-                        return KeyEventResult.ignored;
-                      },
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.calendar_month),
-                        title: const Text("Booking Date"),
-                        subtitle: Text(formatDate(selectedBookingDate)),
-                        trailing: const Icon(Icons.edit),
-                        onTap: selectBookingDate,
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Icon(Icons.schedule),
-                        const SizedBox(width: 12),
-                        Text(
-                          "${formatTimeOfDay(fromTime)} to ${formatTimeOfDay(toTime)}",
-                          style: const TextStyle(fontWeight: FontWeight.w700),
+                              Future.delayed(
+                                const Duration(milliseconds: 100),
+                                () {
+                                  confirmFocus.requestFocus();
+                                },
+                              );
+                            }
+                          },
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    _TimeChoice(
-                      label: "From",
-                      time: fromTime,
-                      onChanged: (TimeOfDay time) {
-                        updateBookingForm(() => fromTime = time);
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    _TimeChoice(
-                      label: "To",
-                      time: toTime,
-                      onChanged: (TimeOfDay time) {
-                        updateBookingForm(() => toTime = time);
-                      },
-                    ),
-
-                    TextField(
-                      controller: daysController,
-                      focusNode: daysFocus,
-                      keyboardType: TextInputType.number,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: "Number of Days *",
-                        prefixIcon: Icon(Icons.nights_stay),
-                      ),
-                      onSubmitted: (value) {
-                        advanceFocus.requestFocus();
-                      },
-                    ),
-
-                    TextField(
-                      controller: advanceController,
-                      focusNode: advanceFocus,
-                      keyboardType: TextInputType.number,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: "Advance Payment",
-                        prefixIcon: Icon(Icons.payments),
-                      ),
-                      onSubmitted: (value) {
-                        paymentFocus.requestFocus();
-                      },
-                    ),
-
-                    const SizedBox(height: 15),
-
-                    DropdownButtonFormField<String>(
-                      focusNode: paymentFocus,
-                      initialValue: paymentMode,
-                      decoration: const InputDecoration(
-                        labelText: "Payment Mode",
-                        prefixIcon: Icon(Icons.payment),
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: "Cash", child: Text("Cash")),
-                        DropdownMenuItem(value: "UPI", child: Text("UPI")),
-                        DropdownMenuItem(value: "Card", child: Text("Card")),
-                        DropdownMenuItem(
-                          value: "Bank Transfer",
-                          child: Text("Bank Transfer"),
-                        ),
-                      ],
-                      onChanged: (String? value) {
-                        if (value != null) {
-                          paymentMode = value;
-
-                          Future.delayed(const Duration(milliseconds: 100), () {
-                            confirmFocus.requestFocus();
-                          });
-                        }
-                      },
-                    ),
-                  ],
+                  ),
                 ),
               ),
+              actions: [
+                CustomButton.text(
+                  onPressed: saving
+                      ? null
+                      : () {
+                          Navigator.pop(dialogContext, false);
+                        },
+                  child: const Text("Cancel"),
+                ),
+                CustomButton(
+                  focusNode: confirmFocus,
+                  onPressed: saving ? null : confirmBooking,
+                  child: Text(
+                    saving
+                        ? saveStage
+                        : isToday(selectedBookingDate)
+                        ? 'Confirm booking'
+                        : 'Confirm future booking',
+                  ),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext, false);
-                },
-                child: const Text("CANCEL"),
-              ),
-              ElevatedButton(
-                focusNode: confirmFocus,
-                onPressed: confirmBooking,
-                child: const Text("CONFIRM BOOKING"),
-              ),
-            ],
           );
         },
       );
     },
   );
-}
-
-class _TimeChoice extends StatelessWidget {
-  const _TimeChoice({
-    required this.label,
-    required this.time,
-    required this.onChanged,
-  });
-
-  final String label;
-  final TimeOfDay time;
-  final ValueChanged<TimeOfDay> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final int hour12 = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
-    final int minute = const [0, 15, 30, 45].contains(time.minute)
-        ? time.minute
-        : 0;
-    return Row(
-      children: [
-        SizedBox(
-          width: 42,
-          child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-        ),
-        _part<int>(
-          hour12,
-          List<int>.generate(12, (int index) => index + 1),
-          (int value) => onChanged(_clock(value, minute, time.period)),
-          (int value) => "$value",
-        ),
-        const Text(" : "),
-        _part<int>(
-          minute,
-          const [0, 15, 30, 45],
-          (int value) => onChanged(_clock(hour12, value, time.period)),
-          (int value) => value.toString().padLeft(2, "0"),
-        ),
-        const SizedBox(width: 6),
-        _part<DayPeriod>(
-          time.period,
-          const [DayPeriod.am, DayPeriod.pm],
-          (DayPeriod value) => onChanged(_clock(hour12, minute, value)),
-          (DayPeriod value) => value == DayPeriod.am ? "AM" : "PM",
-        ),
-      ],
-    );
-  }
-
-  TimeOfDay _clock(int hour12, int minute, DayPeriod period) {
-    int hour = hour12 % 12;
-    if (period == DayPeriod.pm) hour += 12;
-    return TimeOfDay(hour: hour, minute: minute);
-  }
-
-  Widget _part<T>(
-    T value,
-    List<T> options,
-    ValueChanged<T> onPick,
-    String Function(T value) labelFor,
-  ) {
-    return DropdownButton<T>(
-      value: value,
-      isDense: true,
-      items: options
-          .map(
-            (T option) => DropdownMenuItem<T>(
-              value: option,
-              child: Text(labelFor(option)),
-            ),
-          )
-          .toList(),
-      onChanged: (T? picked) {
-        if (picked != null) onPick(picked);
-      },
-    );
-  }
 }

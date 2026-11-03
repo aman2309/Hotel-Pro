@@ -469,6 +469,8 @@ class HotelCloudCodec {
         'bookingDate': bill.bookingDate?.toIso8601String(),
         'bookingTime': bill.bookingTime?.toIso8601String(),
         'checkoutTime': bill.checkoutTime?.toIso8601String(),
+        if (bill.finalStayMinutes != null)
+          'stayDurationMinutes': bill.finalStayMinutes,
         'days': bill.bookedDays,
         'roomRate': bill.roomRate,
         'advance': bill.advance,

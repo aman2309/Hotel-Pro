@@ -1,3 +1,4 @@
+// Historical compatibility code; excluded from the production app import graph.
 import 'package:flutter/material.dart';
 
 import '../services/cpanel_api.dart';
@@ -54,7 +55,8 @@ class _CpanelGateState extends State<CpanelGate> {
     } on CpanelApiException catch (error) {
       if (sync.session.userId != null && error.status >= 500) {
         HotelCloudSyncService.instance.status = HotelCloudStatus.offline;
-        HotelCloudSyncService.instance.lastError = 'Saved hotel is on this phone. Server sync failed.';
+        HotelCloudSyncService.instance.lastError =
+            'Saved hotel is on this phone. Server sync failed.';
         if (mounted) {
           setState(() {
             _ready = true;
@@ -72,7 +74,8 @@ class _CpanelGateState extends State<CpanelGate> {
     } catch (_) {
       if (sync.session.userId != null) {
         HotelCloudSyncService.instance.status = HotelCloudStatus.offline;
-        HotelCloudSyncService.instance.lastError = 'Saved hotel is on this phone. Server sync failed.';
+        HotelCloudSyncService.instance.lastError =
+            'Saved hotel is on this phone. Server sync failed.';
         if (mounted) {
           setState(() {
             _ready = true;
@@ -84,7 +87,8 @@ class _CpanelGateState extends State<CpanelGate> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _detail = 'The server could not be reached. No empty hotel was created.';
+          _detail =
+              'The server could not be reached. No empty hotel was created.';
         });
       }
     }

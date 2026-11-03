@@ -1,8 +1,8 @@
-const {Timestamp} = require('firebase-admin/firestore');
-const {DEFAULT_ROOMS, emptyRoomDocument} = require('./default_rooms');
+const {Timestamp, FieldValue} = require('firebase-admin/firestore');
 
 const REPAIR_AFTER_MS = Date.parse('2026-10-22T18:30:00.000Z');
 const TRIAL_MS = 10 * 24 * 60 * 60 * 1000;
+const DEFAULT_ROOM_NUMBERS = [101, 102, 103, 104, 105, 106, 201, 202, 203, 204, 205, 206];
 const HISTORY = ['bookings', 'guests', 'bills', 'payments', 'expenses'];
 
 function isVerifiedNewAccount(biz, licenseExists, license) {
@@ -21,23 +21,21 @@ async function provisionHotel(db, uid, phone, now = Date.now()) {
   return db.runTransaction(async (tx) => {
     const userSnap = await tx.get(userRef);
     const user = userSnap.data();
-    if (!user || user.phoneNumber !== phone) throw Error('Verified owner required');
+    if (!user || (phone.includes('@') ? user.email !== phone : user.phoneNumber !== phone)) throw Error('Verified owner required');
     const id = user.businessId;
     if (typeof id !== 'string' || !id || id.includes('/')) throw Error('Invalid mapping');
     const bizRef = db.doc(`businesses/${id}`);
     const licenseRef = db.doc(`businesses/${id}/settings/license`);
     const markerRef = db.doc(`businesses/${id}/settings/onboarding`);
-    const roomRefs = DEFAULT_ROOMS.map((spec) => db.doc(`businesses/${id}/rooms/room_${spec.roomNumber}`));
     const historyRefs = HISTORY.map((name) => db.collection(`businesses/${id}/${name}`).limit(1));
-    const [bizSnap, licenseSnap, markerSnap, ...rest] = await Promise.all([
+    const [bizSnap, licenseSnap, markerSnap, roomsSnap, ...rest] = await Promise.all([
       tx.get(bizRef),
       tx.get(licenseRef),
       tx.get(markerRef),
-      ...roomRefs.map((ref) => tx.get(ref)),
+      tx.get(db.collection(`businesses/${id}/rooms`).limit(1)),
       ...historyRefs.map((query) => tx.get(query)),
     ]);
-    const roomSnaps = rest.slice(0, DEFAULT_ROOMS.length);
-    const historySnaps = rest.slice(DEFAULT_ROOMS.length);
+    const historySnaps = rest;
     if (!bizSnap.exists || bizSnap.data().ownerUid !== uid) throw Error('Hotel owner mismatch');
     const biz = bizSnap.data();
     if (markerSnap.data()?.status === 'complete') {
@@ -47,12 +45,21 @@ async function provisionHotel(db, uid, phone, now = Date.now()) {
     if (biz.dataResetAt || operational || !isVerifiedNewAccount(biz, licenseSnap.exists, licenseSnap.data() || {})) {
       return {provisioned: false, reason: 'existing-hotel', businessId: id, roomsAdded: 0};
     }
-    let added = 0;
-    DEFAULT_ROOMS.forEach((spec, index) => {
-      if (roomSnaps[index].exists) return;
-      tx.set(roomRefs[index], emptyRoomDocument(spec));
-      added += 1;
-    });
+    // Seed once, on the server, only for a genuinely new empty hotel.
+    // Any existing room (including a tombstone) protects the owner's custom setup.
+    const added = roomsSnap.empty ? DEFAULT_ROOM_NUMBERS.length : 0;
+    if (added) {
+      for (const roomNumber of DEFAULT_ROOM_NUMBERS) {
+        tx.create(db.doc(`businesses/${id}/rooms/room_${roomNumber}`), {
+          roomNumber, roomType: 'Standard', normalRent: 0, status: 'EMPTY',
+          schemaVersion: 3, deleted: false,
+          createdAt: Timestamp.fromMillis(now), updatedAt: Timestamp.fromMillis(now),
+        });
+      }
+      tx.set(db.doc(`businesses/${id}/settings/sync`), {
+        schemaVersion: 3, lastSyncAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+    }
     if (!licenseSnap.exists) {
       tx.set(licenseRef, {
         trialStart: Timestamp.fromMillis(now),
@@ -66,6 +73,7 @@ async function provisionHotel(db, uid, phone, now = Date.now()) {
     tx.set(markerRef, {
       status: 'complete',
       roomsAdded: added,
+      roomTemplateVersion: 1,
       completedAt: Timestamp.fromMillis(now),
     });
     tx.set(bizRef, {onboardingStatus: 'complete'}, {merge: true});
@@ -73,4 +81,4 @@ async function provisionHotel(db, uid, phone, now = Date.now()) {
   });
 }
 
-module.exports = {provisionHotel, isVerifiedNewAccount, TRIAL_MS};
+module.exports = {provisionHotel, isVerifiedNewAccount, TRIAL_MS, DEFAULT_ROOM_NUMBERS};

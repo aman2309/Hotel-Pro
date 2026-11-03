@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/hotel_data_buffer.dart';
 
 import '../models/bill_record.dart';
 import '../services/hotel_record_ids.dart';
@@ -14,7 +14,7 @@ class BillStore {
   static final List<BillRecord> bills = [];
 
   static Future<void> loadBills() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
 
     final String? savedData = prefs.getString(_storageKey);
 
@@ -60,7 +60,7 @@ class BillStore {
   static String nextBillNumber() => HotelRecordIds.create('BILL');
 
   static Future<void> _saveBillsToDisk() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final HotelDataBuffer prefs = await HotelDataBuffer.getInstance();
 
     final List<Map<String, dynamic>> data = bills
         .map((bill) => bill.toJson())
