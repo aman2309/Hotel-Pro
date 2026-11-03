@@ -5,6 +5,7 @@ import '../theme/custom_colors.dart';
 import '../utils/responsive_ui.dart';
 import '../widgets/hotel_ui.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/hotel_membership_card.dart';
 
 class LicenseScreen extends StatefulWidget {
   const LicenseScreen({
@@ -73,22 +74,13 @@ class _LicenseScreenState extends State<LicenseScreen> {
           builder: (context, ui) => Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(
-                Icons.workspace_premium_rounded,
-                size: 60,
-                color: CustomColors.primary,
-              ),
-              const SizedBox(height: 18),
-              const Text(
-                'More great stays ahead.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 27, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Continue Hotel Pro with your license key.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: CustomColors.muted),
+              HotelMembershipCard(
+                view: license.cloudView,
+                daysLeft: license.daysLeft,
+                endsAt:
+                    license.expiresAt ??
+                    license.trialEndsAt ??
+                    license.trialEnd,
               ),
               const SizedBox(height: 24),
               CustomSurface(
@@ -105,11 +97,6 @@ class _LicenseScreenState extends State<LicenseScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Text(
-                      license.statusLine,
-                      style: const TextStyle(color: CustomColors.muted),
-                    ),
-                    const SizedBox(height: 18),
                     CustomTextField(
                       controller: _key,
                       enabled: !_busy,

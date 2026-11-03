@@ -1,4 +1,4 @@
-import '../theme/custom_colors.dart';
+import 'hotel_membership_card.dart';
 import 'package:flutter/material.dart';
 
 import '../screens/license_screen.dart';
@@ -19,11 +19,13 @@ class TrialBanner extends StatelessWidget {
         if (license.cloudView == HotelLicenseView.unreadable) {
           return const SizedBox.shrink();
         }
-        final bool renew = license.cloudView == HotelLicenseView.activated;
-        final urgent = license.expired || (!renew && license.daysLeft <= 2);
-        return Material(
-          color: urgent ? CustomColors.bookedTint : CustomColors.neutralTint,
-          child: InkWell(
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 22),
+          child: HotelMembershipCard(
+            view: license.cloudView,
+            daysLeft: license.daysLeft,
+            endsAt:
+                license.expiresAt ?? license.trialEndsAt ?? license.trialEnd,
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
@@ -36,37 +38,6 @@ class TrialBanner extends StatelessWidget {
                 ),
               );
             },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.timer_outlined,
-                    color: CustomColors.button,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      license.warningLine,
-                      style: const TextStyle(
-                        color: CustomColors.button,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    renew ? 'Renew with a license key' : 'Activate',
-                    style: const TextStyle(
-                      color: CustomColors.button,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ),
         );
       },
