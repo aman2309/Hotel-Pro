@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import '../admin/admin_dialog.dart';
 import 'package:flutter/cupertino.dart'
     show CupertinoDatePicker, CupertinoDatePickerMode;
 import '../theme/custom_colors.dart';
@@ -13,48 +15,60 @@ Future<T?> showCustomBottomSheet<T>({
   bool useRootNavigator = true,
   Color? backgroundColor,
   ShapeBorder? shape,
-}) => showModalBottomSheet<T>(
-  context: context,
-  useRootNavigator: useRootNavigator,
-  isScrollControlled: true,
-  useSafeArea: true,
-  isDismissible: barrierDismissible,
-  enableDrag: barrierDismissible,
-  showDragHandle: true,
-  backgroundColor: backgroundColor ?? CustomColors.surface,
-  shape:
-      shape ??
-      const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-  clipBehavior: Clip.antiAlias,
-  constraints: const BoxConstraints(maxWidth: 840),
-  builder: (context) {
-    final media = MediaQuery.of(context);
-    final height =
-        (media.size.height - media.viewInsets.bottom - media.padding.top - 64)
-            .clamp(80.0, media.size.height);
-    return AnimatedPadding(
-      duration: const Duration(milliseconds: 160),
-      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
-      child: MediaQuery.removeViewInsets(
+}) => kIsWeb
+    ? showAdminDialog<T>(
         context: context,
-        removeBottom: true,
-        child: SafeArea(
-          top: false,
-          left: false,
-          right: false,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: height - media.padding.bottom,
+        builder: builder,
+        barrierDismissible: barrierDismissible,
+      )
+    : showModalBottomSheet<T>(
+        context: context,
+        useRootNavigator: useRootNavigator,
+        isScrollControlled: true,
+        useSafeArea: true,
+        isDismissible: barrierDismissible,
+        enableDrag: barrierDismissible,
+        showDragHandle: true,
+        backgroundColor: backgroundColor ?? CustomColors.surface,
+        shape:
+            shape ??
+            const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
             ),
-            child: SizedBox(width: double.infinity, child: builder(context)),
-          ),
-        ),
-      ),
-    );
-  },
-);
+        clipBehavior: Clip.antiAlias,
+        constraints: const BoxConstraints(maxWidth: 840),
+        builder: (context) {
+          final media = MediaQuery.of(context);
+          final height =
+              (media.size.height -
+                      media.viewInsets.bottom -
+                      media.padding.top -
+                      64)
+                  .clamp(80.0, media.size.height);
+          return AnimatedPadding(
+            duration: const Duration(milliseconds: 160),
+            padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+            child: MediaQuery.removeViewInsets(
+              context: context,
+              removeBottom: true,
+              child: SafeArea(
+                top: false,
+                left: false,
+                right: false,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: height - media.padding.bottom,
+                  ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: builder(context),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
 
 /// A bounded panel for full-height photo/PDF content.
 class CustomSheetPanel extends StatelessWidget {

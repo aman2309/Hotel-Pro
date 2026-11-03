@@ -1,6 +1,6 @@
 import '../widgets/custom_button.dart';
 import 'dart:async';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -42,9 +42,12 @@ class _CloudGateState extends State<CloudGate> {
   @override
   void initState() {
     super.initState();
-    if (!Platform.isAndroid || !widget.firebaseReady) {
-      _phase = Platform.isAndroid ? _GatePhase.failed : _GatePhase.desktop;
-      _detail = Platform.isAndroid
+    if (!(kIsWeb || defaultTargetPlatform == TargetPlatform.android) ||
+        !widget.firebaseReady) {
+      _phase = (kIsWeb || defaultTargetPlatform == TargetPlatform.android)
+          ? _GatePhase.failed
+          : _GatePhase.desktop;
+      _detail = (kIsWeb || defaultTargetPlatform == TargetPlatform.android)
           ? 'Firebase did not start. Hotel data was not loaded as an empty hotel.'
           : null;
       return;

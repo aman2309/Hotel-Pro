@@ -28,3 +28,9 @@ Legacy annual PIN callables remain available for already-installed older apps; t
 ## Validation
 
 Backend emulator tests cover calendar arithmetic, authorization, hotel binding, replay/concurrent redemption, issuance retries, revocation, trial preservation and analytics. Flutter widget checks cover desktop/mobile admin layouts, key generation and the customer membership screen. Live verification uses the configured admin account to read hotels, records and analytics, issue/revoke a diagnostic key and reject unauthenticated admin access. Existing hotels are not activated or modified by that diagnostic.
+
+## Hotel owner web workspace
+
+The same hosted Flutter app now offers Hotel Login and Super Admin. Both authenticate with Firebase email/password in the existing project. Routing uses the signed Firebase `admin` claim, never a client-selected role. Owners enter the shared cloud gate and use the same rooms, bookings, guests, reports, expenses, settings and license flows as Android. Existing owner/business security rules remain authoritative; no additional data access is granted by choosing a login tab.
+
+Hotel Login uses the existing app email/password. It restores the hotel from the server before displaying rooms. Web operational data uses the RAM buffer with Firestore disk persistence disabled. Auth sessions last for the browser session. Signing out stops cloud work and clears the owner session. Web forms use centered dialogs; Android retains bottom sheets. ID photos can be uploaded on web; Android OCR is unavailable in browsers, so guest details can be entered manually.

@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
+import 'hotel_photo_file_stub.dart'
+    if (dart.library.io) 'hotel_photo_file_io.dart';
 import 'dart:typed_data';
 
 import 'hotel_photo_ref.dart';
@@ -18,13 +19,4 @@ Uint8List? hotelPhotoBytes(String photoData) {
   }
 }
 
-Uint8List? _readFile(String path) {
-  final File file = File(path);
-  if (!file.existsSync()) return null;
-  try {
-    final Uint8List bytes = file.readAsBytesSync();
-    return bytes.isEmpty ? null : bytes;
-  } catch (_) {
-    return null;
-  }
-}
+Uint8List? _readFile(String path) => readHotelPhotoFile(path);

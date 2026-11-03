@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../services/hotel_data_buffer.dart';
 
 import '../services/phone_auth_service.dart';
@@ -2069,6 +2070,10 @@ class _RoomDashboardState extends State<RoomDashboard>
           ExpenseStore.expenses.clear();
         }
         if (!mounted) return;
+        if (kIsWeb) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+          return;
+        }
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute<void>(
             builder: (_) => const CloudGate(firebaseReady: true),

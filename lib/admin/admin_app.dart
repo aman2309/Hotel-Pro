@@ -4,12 +4,16 @@ import '../theme/app_theme.dart';
 import '../theme/custom_colors.dart';
 import '../widgets/hotel_ui.dart';
 import 'admin_console.dart';
+import '../app_navigator.dart';
+import '../screens/cloud_gate.dart';
+import '../services/password_auth_service.dart';
 
 class HotelAdminApp extends StatelessWidget {
   const HotelAdminApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Hotel Pro Admin',
+    title: 'Hotel Pro',
+    navigatorKey: appNavigatorKey,
     debugShowCheckedModeBanner: false,
     theme: AppTheme.light,
     home: const _AdminGate(),
@@ -25,7 +29,9 @@ class _AdminGate extends StatelessWidget {
       if (snapshot.connectionState == ConnectionState.waiting) {
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
       }
-      if (snapshot.data == null) return const AdminLogin();
+      if (snapshot.data == null) {
+        return const AdminLogin(initialHotelMode: true);
+      }
       return FutureBuilder<IdTokenResult>(
         future: snapshot.data!.getIdTokenResult(true),
         builder: (context, token) {
@@ -34,28 +40,28 @@ class _AdminGate extends StatelessWidget {
               body: Center(child: CircularProgressIndicator()),
             );
           }
-          if (token.data?.claims?['admin'] != true) {
+          if (token.hasError) {
             return Scaffold(
               body: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.lock_outline_rounded, size: 48),
-                      const SizedBox(height: 16),
-                      const Text('Administrator access required.'),
-                      const Text(
-                        'Hotel owner accounts cannot open this panel.',
-                      ),
-                      TextButton(
-                        onPressed: () => FirebaseAuth.instance.signOut(),
-                        child: const Text('Use another account'),
-                      ),
-                    ],
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Could not verify access. Check your connection and sign in again.',
+                    ),
+                    TextButton(
+                      onPressed: () => FirebaseAuth.instance.signOut(),
+                      child: const Text('Sign out'),
+                    ),
+                  ],
                 ),
               ),
+            );
+          }
+          if (token.data?.claims?['admin'] != true) {
+            return CloudGate(
+              key: ValueKey(snapshot.data!.uid),
+              firebaseReady: true,
             );
           }
           return AdminConsole(
@@ -69,7 +75,8 @@ class _AdminGate extends StatelessWidget {
 }
 
 class AdminLogin extends StatefulWidget {
-  const AdminLogin({super.key, this.signIn});
+  const AdminLogin({super.key, this.signIn, this.initialHotelMode = false});
+  final bool initialHotelMode;
   final Future<void> Function(String email, String password)? signIn;
   @override
   State<AdminLogin> createState() => _AdminLoginState();
@@ -80,6 +87,13 @@ class _AdminLoginState extends State<AdminLogin> {
   final _passwordFocus = FocusNode();
   bool _busy = false, _visible = false;
   String? _error;
+  late bool _hotelMode;
+  @override
+  void initState() {
+    super.initState();
+    _hotelMode = widget.initialHotelMode;
+  }
+
   @override
   void dispose() {
     _email.dispose();
@@ -91,7 +105,7 @@ class _AdminLoginState extends State<AdminLogin> {
   Future<void> _login() async {
     if (_busy) return;
     if (!_email.text.trim().contains('@') || _password.text.isEmpty) {
-      setState(() => _error = 'Enter your admin email and password.');
+      setState(() => _error = 'Enter your email and password.');
       return;
     }
     setState(() {
@@ -101,6 +115,11 @@ class _AdminLoginState extends State<AdminLogin> {
     try {
       if (widget.signIn != null) {
         await widget.signIn!(_email.text.trim(), _password.text);
+      } else if (_hotelMode) {
+        await PasswordAuthService.instance.login(
+          _email.text.trim(),
+          _password.text,
+        );
       } else {
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: _email.text.trim(),
@@ -154,8 +173,8 @@ class _AdminLoginState extends State<AdminLogin> {
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 34, fontWeight: FontWeight.w700),
                 ),
-                const Text(
-                  'ADMIN WORKSPACE',
+                Text(
+                  _hotelMode ? 'YOUR HOTEL WORKSPACE' : 'ADMIN WORKSPACE',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     letterSpacing: 3,
@@ -164,6 +183,29 @@ class _AdminLoginState extends State<AdminLogin> {
                   ),
                 ),
                 const SizedBox(height: 32),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(
+                      value: true,
+                      icon: Icon(Icons.hotel_outlined),
+                      label: Text('Hotel Login'),
+                    ),
+                    ButtonSegment(
+                      value: false,
+                      icon: Icon(Icons.admin_panel_settings_outlined),
+                      label: Text('Super Admin'),
+                    ),
+                  ],
+                  selected: {_hotelMode},
+                  onSelectionChanged: _busy
+                      ? null
+                      : (values) => setState(() {
+                          _hotelMode = values.single;
+                          _error = null;
+                          _password.clear();
+                        }),
+                ),
+                const SizedBox(height: 20),
                 CustomSurface(
                   child: AutofillGroup(
                     child: Column(
@@ -177,14 +219,16 @@ class _AdminLoginState extends State<AdminLogin> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Your hotels. One connected workspace.',
+                        Text(
+                          _hotelMode
+                              ? 'Use your app account to manage rooms, bookings and reports.'
+                              : 'All hotels, analytics and license keys. Admin access only.',
                           style: TextStyle(color: CustomColors.muted),
                         ),
                         const SizedBox(height: 24),
                         CustomTextField(
                           controller: _email,
-                          label: 'Admin email',
+                          label: _hotelMode ? 'Login email' : 'Admin email',
                           icon: Icons.alternate_email_rounded,
                           keyboardType: TextInputType.emailAddress,
                           enabled: !_busy,
@@ -223,8 +267,10 @@ class _AdminLoginState extends State<AdminLogin> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Text(
-                  'Private access · Connected to Firebase',
+                Text(
+                  _hotelMode
+                      ? 'Same account. Same hotel. Live Firebase data.'
+                      : 'Private access · Connected to Firebase',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: CustomColors.muted),
                 ),

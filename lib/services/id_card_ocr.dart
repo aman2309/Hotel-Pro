@@ -55,7 +55,7 @@ class IdCardOcr {
   ];
 
   static Future<IdCardScan> scanFile(String path) async {
-    if (path.trim().isEmpty) {
+    if (kIsWeb || path.trim().isEmpty) {
       return const IdCardScan();
     }
 
@@ -70,6 +70,7 @@ class IdCardOcr {
   }
 
   static Future<IdCardScan> scanBytes(Uint8List bytes) async {
+    if (kIsWeb) return const IdCardScan();
     final File file = File(
       '${Directory.systemTemp.path}/id_ocr_${DateTime.now().microsecondsSinceEpoch}.jpg',
     );
