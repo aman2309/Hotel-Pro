@@ -68,7 +68,8 @@ Future<bool?> showBookingDialog(
   }
 
   DateTime selectedBookingDate = dateOnly(DateTime.now());
-  TimeOfDay fromTime = TimeOfDay.now();
+  TimeOfDay fromTime = const TimeOfDay(hour: 12, minute: 0);
+  bool customTimes = false;
   TimeOfDay toTime = const TimeOfDay(hour: 11, minute: 0);
 
   String paymentMode = "Cash";
@@ -301,7 +302,7 @@ Future<bool?> showBookingDialog(
               addressField: addressController,
             );
 
-            rentFocus.requestFocus();
+            nameFocus.requestFocus();
           }
 
           void searchCustomer() {
@@ -342,7 +343,7 @@ Future<bool?> showBookingDialog(
 
               rentFocus.requestFocus();
             } else if (!alreadyLookedUp) {
-              nameFocus.requestFocus();
+              frontPhotoFocus.requestFocus();
             }
           }
 
@@ -788,6 +789,26 @@ Future<bool?> showBookingDialog(
                           },
                         ),
 
+                        Row(
+                          children: [
+                            photoButton(
+                              title: "ID FRONT PHOTO",
+                              photoData: idFrontPhoto,
+                              focusNode: frontPhotoFocus,
+                              onPressed: pickFrontPhoto,
+                            ),
+                            const SizedBox(width: 10),
+                            photoButton(
+                              title: "ID BACK PHOTO",
+                              photoData: idBackPhoto,
+                              focusNode: backPhotoFocus,
+                              onPressed: pickBackPhoto,
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 16),
+
                         CustomTextField(
                           controller: nameController,
                           focusNode: nameFocus,
@@ -825,29 +846,11 @@ Future<bool?> showBookingDialog(
                             prefixIcon: Icon(Icons.home_outlined),
                           ),
                           onSubmitted: (value) {
-                            frontPhotoFocus.requestFocus();
+                            rentFocus.requestFocus();
                           },
                         ),
 
                         const SizedBox(height: 15),
-
-                        Row(
-                          children: [
-                            photoButton(
-                              title: "ID FRONT PHOTO",
-                              photoData: idFrontPhoto,
-                              focusNode: frontPhotoFocus,
-                              onPressed: pickFrontPhoto,
-                            ),
-                            const SizedBox(width: 10),
-                            photoButton(
-                              title: "ID BACK PHOTO",
-                              photoData: idBackPhoto,
-                              focusNode: backPhotoFocus,
-                              onPressed: pickBackPhoto,
-                            ),
-                          ],
-                        ),
 
                         const SizedBox(height: 10),
 
@@ -1077,6 +1080,27 @@ Future<bool?> showBookingDialog(
                                       searchExtraCustomer();
                                     },
                                   ),
+                                  Row(
+                                    children: [
+                                      photoButton(
+                                        title: "ID FRONT PHOTO",
+                                        photoData:
+                                            guest["frontPhoto"] as String,
+                                        focusNode:
+                                            guest["frontFocus"] as FocusNode,
+                                        onPressed: pickExtraFrontPhoto,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      photoButton(
+                                        title: "ID BACK PHOTO",
+                                        photoData: guest["backPhoto"] as String,
+                                        focusNode:
+                                            guest["backFocus"] as FocusNode,
+                                        onPressed: pickExtraBackPhoto,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
                                   CustomTextField(
                                     controller: guest["name"],
                                     focusNode: guest["nameFocus"],
@@ -1119,26 +1143,6 @@ Future<bool?> showBookingDialog(
                                     },
                                   ),
                                   const SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      photoButton(
-                                        title: "ID FRONT PHOTO",
-                                        photoData:
-                                            guest["frontPhoto"] as String,
-                                        focusNode:
-                                            guest["frontFocus"] as FocusNode,
-                                        onPressed: pickExtraFrontPhoto,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      photoButton(
-                                        title: "ID BACK PHOTO",
-                                        photoData: guest["backPhoto"] as String,
-                                        focusNode:
-                                            guest["backFocus"] as FocusNode,
-                                        onPressed: pickExtraBackPhoto,
-                                      ),
-                                    ],
-                                  ),
                                 ],
                               ),
                             ),
@@ -1157,76 +1161,10 @@ Future<bool?> showBookingDialog(
                             prefixIcon: Icon(Icons.currency_rupee_rounded),
                           ),
                           onSubmitted: (value) {
-                            selectBookingDate();
+                            daysFocus.requestFocus();
                           },
                         ),
 
-                        const SizedBox(height: 8),
-
-                        const Align(
-                          alignment: Alignment.centerLeft,
-                          child: Padding(
-                            padding: EdgeInsets.only(bottom: 14),
-                            child: Text(
-                              'Stay dates & times',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Wrap(
-                            spacing: 8,
-                            children: [
-                              ActionChip(
-                                label: const Text('Today'),
-                                onPressed: () => updateBookingForm(
-                                  () => selectedBookingDate = dateOnly(
-                                    DateTime.now(),
-                                  ),
-                                ),
-                              ),
-                              ActionChip(
-                                label: const Text('Tomorrow'),
-                                onPressed: () => updateBookingForm(
-                                  () => selectedBookingDate = dateOnly(
-                                    DateTime.now().add(const Duration(days: 1)),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        DateTimeField(
-                          label: 'Check-in date',
-                          value: formatDate(selectedBookingDate),
-                          icon: Icons.calendar_month_rounded,
-                          onTap: selectBookingDate,
-                        ),
-                        DateTimeField(
-                          label: 'Check-in time',
-                          value: formatTimeOfDay(fromTime),
-                          icon: Icons.login_rounded,
-                          onTap: () => pickTime(true),
-                        ),
-                        DateTimeField(
-                          label: 'Check-out date',
-                          value: formatDate(
-                            selectedBookingDate.add(Duration(days: stayDays())),
-                          ),
-                          icon: Icons.event_available_rounded,
-                          onTap: selectCheckoutDate,
-                        ),
-                        DateTimeField(
-                          label: 'Check-out time',
-                          value: formatTimeOfDay(toTime),
-                          icon: Icons.logout_rounded,
-                          onTap: () => pickTime(false),
-                        ),
                         CustomTextField(
                           controller: daysController,
                           onChanged: (_) => updateBookingForm(() {}),
@@ -1294,6 +1232,89 @@ Future<bool?> showBookingDialog(
                             }
                           },
                         ),
+                        const SizedBox(height: 24),
+
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Padding(
+                            padding: EdgeInsets.only(bottom: 14),
+                            child: Text(
+                              'Stay dates & times',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Wrap(
+                            spacing: 8,
+                            children: [
+                              ActionChip(
+                                label: const Text('Today'),
+                                onPressed: () => updateBookingForm(
+                                  () => selectedBookingDate = dateOnly(
+                                    DateTime.now(),
+                                  ),
+                                ),
+                              ),
+                              ActionChip(
+                                label: const Text('Tomorrow'),
+                                onPressed: () => updateBookingForm(
+                                  () => selectedBookingDate = dateOnly(
+                                    DateTime.now().add(const Duration(days: 1)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        DateTimeField(
+                          label: 'Check-in date',
+                          value: formatDate(selectedBookingDate),
+                          icon: Icons.calendar_month_rounded,
+                          onTap: selectBookingDate,
+                        ),
+                        DateTimeField(
+                          label: 'Check-out date',
+                          value: formatDate(
+                            selectedBookingDate.add(Duration(days: stayDays())),
+                          ),
+                          icon: Icons.event_available_rounded,
+                          onTap: selectCheckoutDate,
+                        ),
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Set custom times'),
+                          subtitle: const Text(
+                            'Default: check-in 12:00 PM · check-out 11:00 AM',
+                          ),
+                          value: customTimes,
+                          onChanged: (value) => updateBookingForm(() {
+                            customTimes = value;
+                            if (!value) {
+                              fromTime = const TimeOfDay(hour: 12, minute: 0);
+                              toTime = const TimeOfDay(hour: 11, minute: 0);
+                            }
+                          }),
+                        ),
+                        if (customTimes) ...[
+                          DateTimeField(
+                            label: 'Check-in time',
+                            value: formatTimeOfDay(fromTime),
+                            icon: Icons.login_rounded,
+                            onTap: () => pickTime(true),
+                          ),
+                          DateTimeField(
+                            label: 'Check-out time',
+                            value: formatTimeOfDay(toTime),
+                            icon: Icons.logout_rounded,
+                            onTap: () => pickTime(false),
+                          ),
+                        ],
                       ],
                     ),
                   ),

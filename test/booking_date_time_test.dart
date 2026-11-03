@@ -57,6 +57,36 @@ void main() {
         await tester.pumpAndSettle();
       }
 
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is DateTimeField && w.label == 'Check-in time',
+        ),
+        findsNothing,
+      );
+      final customTimes = find.text('Set custom times');
+      await tester.ensureVisible(customTimes);
+      await tester.tap(customTimes);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<DateTimeField>(
+              find.byWidgetPredicate(
+                (w) => w is DateTimeField && w.label == 'Check-in time',
+              ),
+            )
+            .value,
+        '12:00 PM',
+      );
+      expect(
+        tester
+            .widget<DateTimeField>(
+              find.byWidgetPredicate(
+                (w) => w is DateTimeField && w.label == 'Check-out time',
+              ),
+            )
+            .value,
+        '11:00 AM',
+      );
       await openField('Check-in time');
       tester
           .widget<CupertinoDatePicker>(find.byType(CupertinoDatePicker))
@@ -103,6 +133,37 @@ void main() {
         '3',
       );
       expect(tester.widget<TextFormField>(name).controller!.text, 'Test Guest');
+      await tester.ensureVisible(customTimes);
+      await tester.tap(customTimes);
+      await tester.pumpAndSettle();
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is DateTimeField && w.label == 'Check-in time',
+        ),
+        findsNothing,
+      );
+      await tester.tap(customTimes);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<DateTimeField>(
+              find.byWidgetPredicate(
+                (w) => w is DateTimeField && w.label == 'Check-in time',
+              ),
+            )
+            .value,
+        '12:00 PM',
+      );
+      expect(
+        tester
+            .widget<DateTimeField>(
+              find.byWidgetPredicate(
+                (w) => w is DateTimeField && w.label == 'Check-out time',
+              ),
+            )
+            .value,
+        '11:00 AM',
+      );
       expect(find.byType(BottomSheet), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
