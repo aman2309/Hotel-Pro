@@ -115,6 +115,8 @@ void main() {
     await tester.tap(find.text('Generate key'));
     await tester.pumpAndSettle();
     expect(find.text('Generate license key'), findsOneWidget);
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.byType(BottomSheet), findsNothing);
     await tester.tap(find.text('Generate key').last);
     await tester.pumpAndSettle();
     expect(api.calls, contains('adminIssueLicenseKey'));

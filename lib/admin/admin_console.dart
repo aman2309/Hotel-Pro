@@ -5,7 +5,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_saver/file_saver.dart';
 import '../theme/custom_colors.dart';
 import '../widgets/hotel_ui.dart';
-import '../widgets/custom_bottom_sheet.dart';
+import 'admin_dialog.dart';
 import '../widgets/app_toast.dart';
 import 'admin_api.dart';
 import 'admin_widgets.dart';
@@ -238,9 +238,9 @@ class _AdminConsoleState extends State<AdminConsole> {
   }
 
   Future<bool> _confirm(String title, String message, String action) async =>
-      await showCustomBottomSheet<bool>(
+      await showAdminDialog<bool>(
         context: context,
-        builder: (context) => CustomDialog(
+        builder: (context) => AdminDialog(
           title: Text(title),
           content: Text(message),
           actions: [
@@ -286,7 +286,7 @@ class _AdminConsoleState extends State<AdminConsole> {
   }
 
   Future<void> _issueKey({String? hotelId}) async {
-    final result = await showCustomBottomSheet<Map<String, dynamic>>(
+    final result = await showAdminDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
       builder: (context) =>
@@ -307,10 +307,10 @@ class _AdminConsoleState extends State<AdminConsole> {
     String unit,
   ) async {
     final key = '${result['key']}';
-    await showCustomBottomSheet<void>(
+    await showAdminDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => CustomDialog(
+      builder: (context) => AdminDialog(
         title: const Text('Your license key is ready'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1106,9 +1106,9 @@ class _AdminConsoleState extends State<AdminConsole> {
     ),
   );
   Future<void> _showRecord(Map<String, dynamic> record) async {
-    await showCustomBottomSheet<void>(
+    await showAdminDialog<void>(
       context: context,
-      builder: (context) => CustomDialog(
+      builder: (context) => AdminDialog(
         title: Text('${_labels[_collection]} · Record'),
         content: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1183,9 +1183,9 @@ class _AdminConsoleState extends State<AdminConsole> {
       );
       return;
     }
-    await showCustomBottomSheet<void>(
+    await showAdminDialog<void>(
       context: context,
-      builder: (context) => CustomDialog(
+      builder: (context) => AdminDialog(
         title: Text('$side ID photo'),
         content: FutureBuilder<Uint8List?>(
           future: FirebaseStorage.instance.ref(path).getData(5 * 1024 * 1024),

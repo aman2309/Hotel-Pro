@@ -13,6 +13,8 @@ The admin account is `cloud@admin.com`; credentials are not committed. Access re
 
 ## Panel
 
+Admin actions use centered desktop-style dialogs for confirmations, license generation, record details and photo previews. These share the common modal content and safe-area handling; Android app bottom sheets are unchanged.
+
 Overview shows totals for the loaded hotels, membership state and current occupancy. Hotels can be searched, filtered, inspected and suspended/resumed. Load-more buttons make the scope of paginated metrics and exports explicit. Each hotel includes account/contact/license details, UTC monthly completed billing/expense analytics and all operational collections (rooms, bookings, future bookings, guests, bills, payments, expenses, closed rooms, extra charges, hotel settings). ID photos are loaded from protected Storage only on request. Password and internal activation fields are redacted.
 
 ## Keys

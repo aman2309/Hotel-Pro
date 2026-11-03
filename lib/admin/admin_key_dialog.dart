@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../theme/custom_colors.dart';
 import '../widgets/hotel_ui.dart';
 import 'admin_api.dart';
+import 'admin_dialog.dart';
 
 class AdminKeyDialog extends StatefulWidget {
   const AdminKeyDialog({
@@ -66,7 +67,7 @@ class _AdminKeyDialogState extends State<AdminKeyDialog> {
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !_saving,
-    child: CustomDialog(
+    child: AdminDialog(
       canClose: !_saving,
       title: const Text('Generate license key'),
       content: Column(

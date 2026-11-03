@@ -14,6 +14,7 @@ class CustomDialog extends StatelessWidget {
     this.titlePadding,
     this.canClose = true,
     this.notice,
+    this.closeTooltip = 'Close sheet',
   });
   final Widget title;
   final Widget? content, icon, notice;
@@ -21,6 +22,7 @@ class CustomDialog extends StatelessWidget {
   final MainAxisAlignment? actionsAlignment;
   final EdgeInsetsGeometry? titlePadding;
   final bool canClose;
+  final String closeTooltip;
   @override
   Widget build(BuildContext context) {
     final heading = Padding(
@@ -40,7 +42,7 @@ class CustomDialog extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: 'Close sheet',
+            tooltip: closeTooltip,
             onPressed: canClose ? () => Navigator.of(context).pop() : null,
             icon: const Icon(Icons.close_rounded, size: 20),
             color: CustomColors.muted,
