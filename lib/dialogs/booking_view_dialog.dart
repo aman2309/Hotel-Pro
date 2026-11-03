@@ -6,10 +6,11 @@ import '../widgets/custom_dialog.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
+import '../widgets/app_toast.dart';
 
 import '../models/customer.dart';
 import '../models/room.dart';
-import '../services/hotel_photo_bytes.dart';
 import '../stores/customer_store.dart';
 import 'booking_slip_dialog.dart';
 
@@ -25,8 +26,6 @@ Future<void> showBookingViewDialog(
   final String guestName = isFuture ? room.futureGuestName : room.guestName;
 
   final String guestIdNumber = isFuture ? room.futureIdNumber : room.idNumber;
-
-  final int bookingRate = isFuture ? room.futureBookingRate : room.bookingRate;
 
   final DateTime? bookingDate = isFuture
       ? room.futureBookingDate
@@ -52,8 +51,6 @@ Future<void> showBookingViewDialog(
   String idFrontPhoto = customer?.idFrontPhotoPath ?? "";
 
   String idBackPhoto = customer?.idBackPhotoPath ?? "";
-
-  Uint8List? photoBytes(String photoData) => hotelPhotoBytes(photoData);
 
   String formatDate(DateTime? date) {
     if (date == null) {
@@ -89,14 +86,13 @@ Future<void> showBookingViewDialog(
   Future<void> openLargePhoto(
     BuildContext dialogContext,
     String title,
-    String photoData,
+    Uint8List? bytes,
   ) async {
-    Uint8List? bytes = photoBytes(photoData);
-
     if (bytes == null) {
-      ScaffoldMessenger.of(
+      showAppToast(
         dialogContext,
-      ).showSnackBar(const SnackBar(content: Text("Photo not available")));
+        'Photo not available. Refresh your hotel to retry.',
+      );
 
       return;
     }
@@ -132,13 +128,55 @@ Future<void> showBookingViewDialog(
                     ],
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: [
+                      CustomButton.outlineIcon(
+                        onPressed: () => runBookingDocumentAction(
+                          photoContext,
+                          () async {
+                            final pdf = await buildGuestPhotoPdf(title, bytes);
+                            await Printing.sharePdf(
+                              bytes: pdf,
+                              filename: 'Guest-ID-Photo.pdf',
+                            );
+                          },
+                        ),
+                        icon: const Icon(Icons.share_rounded),
+                        label: const Text('Send photo PDF'),
+                      ),
+                      CustomButton.icon(
+                        onPressed: () => runBookingDocumentAction(
+                          photoContext,
+                          () async {
+                            final pdf = await buildGuestPhotoPdf(title, bytes);
+                            await Printing.layoutPdf(
+                              onLayout: (_) async => pdf,
+                              name: 'Guest-ID-Photo',
+                            );
+                          },
+                        ),
+                        icon: const Icon(Icons.print_rounded),
+                        label: const Text('Print photo'),
+                      ),
+                    ],
+                  ),
+                ),
                 const Divider(height: 1),
                 Expanded(
                   child: InteractiveViewer(
                     minScale: 0.5,
                     maxScale: 5,
                     child: Center(
-                      child: Image.memory(bytes, fit: BoxFit.contain),
+                      child: Image.memory(
+                        bytes,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, error, stack) =>
+                            const Text('Photo could not be read'),
+                      ),
                     ),
                   ),
                 ),
@@ -185,60 +223,69 @@ Future<void> showBookingViewDialog(
     );
   }
 
-  Widget photoBox(BuildContext dialogContext, String title, String photoData) {
-    Uint8List? bytes = photoBytes(photoData);
-
+  Widget photoBox(
+    BuildContext dialogContext,
+    String title,
+    String photoData,
+    String mobile,
+    bool front,
+  ) {
     return Expanded(
-      child: InkWell(
-        onTap: () {
-          openLargePhoto(dialogContext, title, photoData);
-        },
-        child: Container(
-          height: 150,
-          decoration: BoxDecoration(
-            border: Border.all(color: CustomColors.muted),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: bytes == null
-              ? Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.image_not_supported_rounded, size: 35),
-                    const SizedBox(height: 5),
-                    Text(title),
-                    const Text(
-                      "Photo not available",
-                      style: TextStyle(fontSize: 10),
-                    ),
-                  ],
-                )
-              : Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(9),
-                      child: Image.memory(bytes, fit: BoxFit.cover),
-                    ),
-                    Align(
-                      alignment: Alignment.bottomCenter,
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(6),
-                        color: CustomColors.muted,
-                        child: Text(
-                          "$title • CLICK TO VIEW",
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: CustomColors.surface,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
+      child: FutureBuilder<Uint8List?>(
+        future: resolveBookingPhoto(photoData, mobile, front),
+        builder: (context, snapshot) {
+          final bytes = snapshot.data;
+          final loading = snapshot.connectionState != ConnectionState.done;
+          return InkWell(
+            onTap: loading
+                ? null
+                : () => openLargePhoto(dialogContext, title, bytes),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              height: 150,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                border: Border.all(color: CustomColors.border),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : bytes == null
+                        ? Center(
+                            child: Text(
+                              snapshot.hasError
+                                  ? 'Could not load photo'
+                                  : 'Photo not available',
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                        : Image.memory(
+                            bytes,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, error, stack) => const Center(
+                              child: Text('Photo could not be read'),
+                            ),
                           ),
-                        ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Text(
+                      '$title · Tap to view',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ],
-                ),
-        ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -294,8 +341,6 @@ Future<void> showBookingViewDialog(
                 bookingDetail("Room Number", room.roomNumber.toString()),
 
                 bookingDetail("Room Type", room.roomType),
-
-                bookingDetail("Room Rent", "₹$bookingRate / Day"),
 
                 bookingDetail(
                   'Check-in date',
@@ -370,9 +415,21 @@ Future<void> showBookingViewDialog(
 
                 Row(
                   children: [
-                    photoBox(dialogContext, "ID FRONT PHOTO", idFrontPhoto),
+                    photoBox(
+                      dialogContext,
+                      "ID FRONT PHOTO",
+                      idFrontPhoto,
+                      guestMobile,
+                      true,
+                    ),
                     const SizedBox(width: 12),
-                    photoBox(dialogContext, "ID BACK PHOTO", idBackPhoto),
+                    photoBox(
+                      dialogContext,
+                      "ID BACK PHOTO",
+                      idBackPhoto,
+                      guestMobile,
+                      false,
+                    ),
                   ],
                 ),
 
@@ -460,12 +517,16 @@ Future<void> showBookingViewDialog(
                                     dialogContext,
                                     "GUEST ${index + 2} ID FRONT PHOTO",
                                     extraFrontPhoto,
+                                    extraMobile,
+                                    true,
                                   ),
                                   const SizedBox(width: 12),
                                   photoBox(
                                     dialogContext,
                                     "GUEST ${index + 2} ID BACK PHOTO",
                                     extraBackPhoto,
+                                    extraMobile,
+                                    false,
                                   ),
                                 ],
                               ),
@@ -489,12 +550,27 @@ Future<void> showBookingViewDialog(
             child: const Text("Close"),
           ),
           CustomButton.outlineIcon(
-            onPressed: () => showBookingSlipPrintView(dialogContext, room),
+            onPressed: () => showBookingSlipPrintView(
+              dialogContext,
+              room,
+              showFutureBooking: isFuture,
+            ),
             icon: const Icon(Icons.preview_rounded),
             label: const Text("Print view"),
           ),
+          CustomButton.outlineIcon(
+            onPressed: () => runBookingDocumentAction(
+              dialogContext,
+              () => shareBookingSlip(room, showFutureBooking: isFuture),
+            ),
+            icon: const Icon(Icons.share_rounded),
+            label: const Text('Send PDF'),
+          ),
           CustomButton.icon(
-            onPressed: () => printBookingSlip(room),
+            onPressed: () => runBookingDocumentAction(
+              dialogContext,
+              () => printBookingSlip(room, showFutureBooking: isFuture),
+            ),
             icon: const Icon(Icons.print_rounded),
             label: const Text("Print"),
           ),

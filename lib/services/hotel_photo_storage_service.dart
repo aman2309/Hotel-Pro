@@ -868,6 +868,36 @@ class HotelPhotoStorageService extends ChangeNotifier {
     });
   }
 
+  Future<Uint8List?> readGuestPhoto(
+    Customer guest, {
+    required bool front,
+  }) async {
+    final raw = front ? guest.idFrontPhotoPath : guest.idBackPhotoPath;
+    final local = decodeBase64Photo(raw);
+    if (local != null) return local;
+    if (!isAvailable || guest.customerId.isEmpty) return null;
+    final businessId = await _businessId();
+    if (businessId == null) return null;
+    final snap = await HotelFirestoreService.instance
+        .col(businessId, 'guests')
+        .doc(guest.customerId)
+        .get(const GetOptions(source: Source.server));
+    final data = snap.data();
+    if (data == null || data['deleted'] == true) return null;
+    final path = _pathFromDoc(data, front: front);
+    if (path == null) return null;
+    final value = await _downloadBase64(path);
+    if (value == null) {
+      throw StateError(lastPhotoError ?? 'ID photo could not be downloaded.');
+    }
+    if (front) {
+      guest.idFrontPhotoPath = value;
+    } else {
+      guest.idBackPhotoPath = value;
+    }
+    return decodeBase64Photo(value);
+  }
+
   /// Download photos after Firestore guest restore. Never throws to caller.
   Future<void> restorePhotos({
     required String businessId,

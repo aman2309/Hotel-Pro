@@ -2,9 +2,12 @@ import '../widgets/custom_bottom_sheet.dart';
 import '../theme/custom_colors.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_dialog.dart';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
+import '../widgets/app_toast.dart';
+import '../services/hotel_photo_storage_service.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -24,61 +27,106 @@ Future<void> showBookingSlipDialog(BuildContext context, Room room) {
   );
 }
 
-Future<void> showBookingSlipPrintView(BuildContext context, Room room) {
+Future<void> showBookingSlipPrintView(
+  BuildContext context,
+  Room room, {
+  bool? showFutureBooking,
+}) {
   return showCustomBottomSheet<void>(
     context: context,
-    builder: (BuildContext dialogContext) {
-      return CustomSheetPanel(
-        insetPadding: const EdgeInsets.all(24),
-        child: SizedBox(
-          width: 720,
-          height: 640,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        "Room ${room.roomNumber} Print View",
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(dialogContext),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: PdfPreview(
-                  canChangePageFormat: false,
-                  canChangeOrientation: false,
-                  allowSharing: false,
-                  pdfFileName: "Booking-Slip-Room-${room.roomNumber}.pdf",
-                  build: (PdfPageFormat format) => buildBookingSlipPdf(room),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    },
+    builder: (_) =>
+        BookingSlipDialog(room: room, showFutureBooking: showFutureBooking),
   );
 }
 
-Future<void> printBookingSlip(Room room) async {
-  final Uint8List bytes = await buildBookingSlipPdf(room);
-  await Printing.layoutPdf(
-    name: "Booking-Slip-Room-${room.roomNumber}",
-    dynamicLayout: false,
-    onLayout: (PdfPageFormat format) async => bytes,
+bool _bookingDocumentBusy = false;
+
+Future<void> runBookingDocumentAction(
+  BuildContext context,
+  Future<void> Function() action,
+) async {
+  if (_bookingDocumentBusy) return;
+  _bookingDocumentBusy = true;
+  showAppToast(context, 'Preparing document…', error: false);
+  try {
+    await action();
+  } catch (error, stack) {
+    debugPrint('Booking document failed: $error\n$stack');
+    if (context.mounted) {
+      showAppToast(
+        context,
+        'Could not open or send the document. Check your connection and try again.',
+      );
+    }
+  } finally {
+    _bookingDocumentBusy = false;
+  }
+}
+
+Future<void> printBookingSlip(Room room, {bool? showFutureBooking}) async {
+  final bytes = await buildBookingSlipPdf(
+    room,
+    showFutureBooking: showFutureBooking,
   );
+  await Printing.layoutPdf(
+    name: 'Booking-Room-${room.roomNumber}',
+    dynamicLayout: false,
+    onLayout: (_) async => bytes,
+  );
+}
+
+Future<void> shareBookingSlip(Room room, {bool? showFutureBooking}) async {
+  final bytes = await buildBookingSlipPdf(
+    room,
+    showFutureBooking: showFutureBooking,
+  );
+  await Printing.sharePdf(
+    bytes: bytes,
+    filename: 'Booking-Room-${room.roomNumber}.pdf',
+  );
+}
+
+Uint8List? printableBookingPhoto(Uint8List? bytes) {
+  if (bytes == null) return null;
+  try {
+    final image = img.decodeImage(bytes);
+    return image == null ? null : Uint8List.fromList(img.encodeJpg(image));
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<Uint8List> buildGuestPhotoPdf(String title, Uint8List bytes) async {
+  final decoded = printableBookingPhoto(bytes);
+  if (decoded == null) throw StateError('This photo could not be read.');
+  final doc = pw.Document();
+  doc.addPage(
+    pw.Page(
+      pageFormat: PdfPageFormat.a4,
+      build: (_) => pw.Column(
+        children: [
+          pw.Text(title),
+          pw.SizedBox(height: 16),
+          pw.Expanded(
+            child: pw.Image(pw.MemoryImage(decoded), fit: pw.BoxFit.contain),
+          ),
+        ],
+      ),
+    ),
+  );
+  return doc.save();
+}
+
+Future<Uint8List?> resolveBookingPhoto(
+  String raw,
+  String mobile,
+  bool front,
+) async {
+  final local = hotelPhotoBytes(raw);
+  if (local != null) return local;
+  final guest = CustomerStore.findByMobile(mobile);
+  if (guest == null) return null;
+  return HotelPhotoStorageService.instance.readGuestPhoto(guest, front: front);
 }
 
 class _SlipGuest {
@@ -153,8 +201,6 @@ String _timeRange(DateTime? from, DateTime? to) {
   return "$start to $end";
 }
 
-Uint8List? _photoBytes(String photoData) => hotelPhotoBytes(photoData);
-
 String _photo(String direct, String? fallback) {
   if (direct.trim().isNotEmpty) return direct;
   return fallback ?? "";
@@ -185,11 +231,11 @@ _SlipGuest _guestFromMap(Map<String, dynamic> guest) {
   );
 }
 
-List<_SlipBooking> _slipBookings(Room room) {
+List<_SlipBooking> _slipBookings(Room room, {bool? showFutureBooking}) {
   final List<_SlipBooking> bookings = [];
   final bool hasCurrent =
       room.guestName.trim().isNotEmpty || room.mobile.trim().isNotEmpty;
-  if (hasCurrent) {
+  if (hasCurrent && showFutureBooking != true) {
     final Customer? customer = CustomerStore.findByMobile(room.mobile);
     bookings.add(
       _SlipBooking(
@@ -209,7 +255,8 @@ List<_SlipBooking> _slipBookings(Room room) {
       ),
     );
   }
-  if (room.futureBooking &&
+  if (showFutureBooking != false &&
+      room.futureBooking &&
       (room.futureGuestName.trim().isNotEmpty ||
           room.futureMobile.trim().isNotEmpty)) {
     final Customer? customer = CustomerStore.findByMobile(room.futureMobile);
@@ -251,9 +298,41 @@ List<_SlipBooking> _slipBookings(Room room) {
   return bookings;
 }
 
-Future<Uint8List> buildBookingSlipPdf(Room room) async {
-  final pw.Document document = pw.Document();
-  final List<_SlipBooking> bookings = _slipBookings(room);
+Future<Uint8List> buildBookingSlipPdf(
+  Room room, {
+  bool? showFutureBooking,
+}) async {
+  // Bundle fonts so printing never depends on a font CDN or Helvetica glyphs.
+  final regular = pw.Font.ttf(
+    await rootBundle.load('assets/fonts/Poppins-Regular.ttf'),
+  );
+  final bold = pw.Font.ttf(
+    await rootBundle.load('assets/fonts/Poppins-Bold.ttf'),
+  );
+  final document = pw.Document(
+    theme: pw.ThemeData.withFont(base: regular, bold: bold),
+  );
+  final selected = _slipBookings(room, showFutureBooking: showFutureBooking);
+  final photos = <String, Uint8List?>{};
+  for (final booking in selected) {
+    for (final guest in [
+      _SlipGuest(
+        name: booking.guestName,
+        mobile: booking.mobile,
+        idNumber: booking.idNumber,
+        frontPhoto: booking.frontPhoto,
+        backPhoto: booking.backPhoto,
+      ),
+      ...booking.guests,
+    ]) {
+      for (final front in [true, false]) {
+        final raw = front ? guest.frontPhoto : guest.backPhoto;
+        photos['${guest.mobile}:$front:${raw.hashCode}'] =
+            await resolveBookingPhoto(raw, guest.mobile, front);
+      }
+    }
+  }
+  final bookings = selected;
 
   pw.Widget line(String title, String value) {
     return pw.Padding(
@@ -274,9 +353,12 @@ Future<Uint8List> buildBookingSlipPdf(Room room) async {
     );
   }
 
-  pw.Widget pdfPhoto(String title, String data) {
-    final Uint8List? bytes = _photoBytes(data);
-    final pw.MemoryImage? image = bytes == null ? null : pw.MemoryImage(bytes);
+  pw.Widget pdfPhoto(String title, String data, String mobile, bool front) {
+    final bytes = photos['$mobile:$front:${data.hashCode}'];
+    final decoded = printableBookingPhoto(bytes);
+    final pw.MemoryImage? image = decoded == null
+        ? null
+        : pw.MemoryImage(decoded);
     return pw.Expanded(
       child: pw.Container(
         padding: const pw.EdgeInsets.all(6),
@@ -300,14 +382,14 @@ Future<Uint8List> buildBookingSlipPdf(Room room) async {
     );
   }
 
-  pw.Widget photoRow(String front, String back) {
+  pw.Widget photoRow(String front, String back, String mobile) {
     return pw.SizedBox(
       height: 210,
       child: pw.Row(
         children: [
-          pdfPhoto("AADHAAR FRONT", front),
+          pdfPhoto("AADHAAR FRONT", front, mobile, true),
           pw.SizedBox(width: 12),
-          pdfPhoto("AADHAAR BACK", back),
+          pdfPhoto("AADHAAR BACK", back, mobile, false),
         ],
       ),
     );
@@ -367,7 +449,7 @@ Future<Uint8List> buildBookingSlipPdf(Room room) async {
         style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
       ),
       pw.SizedBox(height: 6),
-      photoRow(booking.frontPhoto, booking.backPhoto),
+      photoRow(booking.frontPhoto, booking.backPhoto, booking.mobile),
     ]);
     for (var i = 0; i < booking.guests.length; i++) {
       final _SlipGuest guest = booking.guests[i];
@@ -381,7 +463,7 @@ Future<Uint8List> buildBookingSlipPdf(Room room) async {
         line("Mobile", guest.mobile),
         line("ID Number", guest.idNumber),
         pw.SizedBox(height: 6),
-        photoRow(guest.frontPhoto, guest.backPhoto),
+        photoRow(guest.frontPhoto, guest.backPhoto, guest.mobile),
       ]);
     }
   }
@@ -408,37 +490,59 @@ Future<Uint8List> buildBookingSlipPdf(Room room) async {
 }
 
 class BookingSlipDialog extends StatelessWidget {
-  const BookingSlipDialog({super.key, required this.room});
+  const BookingSlipDialog({
+    super.key,
+    required this.room,
+    this.showFutureBooking,
+  });
+  final bool? showFutureBooking;
 
   final Room room;
 
-  Widget screenPhoto(String title, String data) {
-    final Uint8List? bytes = _photoBytes(data);
+  Widget screenPhoto(String title, String data, String mobile, bool front) {
     return Expanded(
-      child: Column(
-        children: [
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            height: 140,
-            width: double.infinity,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              border: Border.all(color: CustomColors.border),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: bytes == null
-                ? const Text("No photo")
-                : ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.memory(bytes, fit: BoxFit.contain),
-                  ),
-          ),
-        ],
+      child: FutureBuilder<Uint8List?>(
+        future: resolveBookingPhoto(data, mobile, front),
+        builder: (context, snapshot) {
+          final bytes = snapshot.data;
+          return Column(
+            children: [
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                height: 140,
+                width: double.infinity,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  border: Border.all(color: CustomColors.border),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: snapshot.connectionState != ConnectionState.done
+                    ? const Center(child: CircularProgressIndicator())
+                    : bytes == null
+                    ? Text(
+                        snapshot.hasError ? 'Could not load photo' : 'No photo',
+                      )
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.memory(
+                          bytes,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, error, stack) =>
+                              const Text('Photo could not be read'),
+                        ),
+                      ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -489,9 +593,19 @@ class BookingSlipDialog extends StatelessWidget {
         const SizedBox(height: 8),
         Row(
           children: [
-            screenPhoto("AADHAAR FRONT", booking.frontPhoto),
+            screenPhoto(
+              "AADHAAR FRONT",
+              booking.frontPhoto,
+              booking.mobile,
+              true,
+            ),
             const SizedBox(width: 10),
-            screenPhoto("AADHAAR BACK", booking.backPhoto),
+            screenPhoto(
+              "AADHAAR BACK",
+              booking.backPhoto,
+              booking.mobile,
+              false,
+            ),
           ],
         ),
         for (var i = 0; i < booking.guests.length; i++) ...[
@@ -506,9 +620,19 @@ class BookingSlipDialog extends StatelessWidget {
           const SizedBox(height: 8),
           Row(
             children: [
-              screenPhoto("FRONT", booking.guests[i].frontPhoto),
+              screenPhoto(
+                "FRONT",
+                booking.guests[i].frontPhoto,
+                booking.guests[i].mobile,
+                true,
+              ),
               const SizedBox(width: 10),
-              screenPhoto("BACK", booking.guests[i].backPhoto),
+              screenPhoto(
+                "BACK",
+                booking.guests[i].backPhoto,
+                booking.guests[i].mobile,
+                false,
+              ),
             ],
           ),
         ],
@@ -518,7 +642,10 @@ class BookingSlipDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<_SlipBooking> bookings = _slipBookings(room);
+    final List<_SlipBooking> bookings = _slipBookings(
+      room,
+      showFutureBooking: showFutureBooking,
+    );
     return CustomDialog(
       title: Text("Room ${room.roomNumber} Booking Slip"),
       content: SizedBox(
@@ -556,12 +683,18 @@ class BookingSlipDialog extends StatelessWidget {
           child: const Text("Close"),
         ),
         CustomButton.outlineIcon(
-          onPressed: () => showBookingSlipPrintView(context, room),
-          icon: const Icon(Icons.preview_rounded),
-          label: const Text("Print view"),
+          onPressed: () => runBookingDocumentAction(
+            context,
+            () => shareBookingSlip(room, showFutureBooking: showFutureBooking),
+          ),
+          icon: const Icon(Icons.share_rounded),
+          label: const Text("Send PDF"),
         ),
         CustomButton.icon(
-          onPressed: () => printBookingSlip(room),
+          onPressed: () => runBookingDocumentAction(
+            context,
+            () => printBookingSlip(room, showFutureBooking: showFutureBooking),
+          ),
           icon: const Icon(Icons.print_rounded),
           label: const Text("Print"),
         ),
