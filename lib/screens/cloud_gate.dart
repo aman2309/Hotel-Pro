@@ -12,7 +12,6 @@ import '../services/hotel_onboarding_service.dart';
 import '../services/hotel_license_policy.dart';
 import '../services/license_service.dart';
 import '../services/phone_auth_service.dart';
-import '../services/password_auth_service.dart';
 import '../stores/bill_store.dart';
 import '../stores/customer_store.dart';
 import '../stores/expense_store.dart';
@@ -66,7 +65,9 @@ class _CloudGateState extends State<CloudGate> {
   Future<void> _resolve() async {
     final int ticket = ++_ticket;
     try {
-      await PasswordAuthService.instance.waitForPreparation();
+      // Keep the OTP form on screen while it maps the hotel, so a rejected
+      // login (for example: no hotel for this number) shows its message.
+      await PhoneAuthService.instance.waitForLoginPreparation();
       if (!mounted || ticket != _ticket) return;
       if (FirebaseAuth.instance.currentUser == null &&
           _phase == _GatePhase.login) {
@@ -76,8 +77,6 @@ class _CloudGateState extends State<CloudGate> {
         _phase = _GatePhase.loading;
         _detail = null;
       });
-      await PhoneAuthService.instance.waitForLoginPreparation();
-      if (!mounted || ticket != _ticket) return;
       final User? user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         await HotelCloudSyncService.instance.retainDataForNextLogin();
