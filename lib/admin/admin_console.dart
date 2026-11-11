@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_saver/file_saver.dart';
 import '../theme/custom_colors.dart';
 import '../widgets/hotel_ui.dart';
@@ -35,6 +34,7 @@ class _AdminConsoleState extends State<AdminConsole> {
       _records = [];
   final _search = TextEditingController();
   int _section = 0, _days = 30, _detailTicket = 0;
+  final Set<String> _deletingIds = {};
   String _hotelFilter = 'All', _collection = 'rooms';
   String? _hotelCursor, _keyCursor, _auditCursor, _recordCursor, _error;
   Map<String, dynamic>? _selected, _detail, _revenue;
@@ -297,17 +297,24 @@ class _AdminConsoleState extends State<AdminConsole> {
     }
   }
 
-  Future<void> _deleteHotel() async {
-    final hotel = _detail ?? _selected;
+  /// Admin must type DELETE: removal is permanent, not a draft.
+  Future<bool> _confirmDelete(String name) async =>
+      await showAdminDialog<bool>(
+        context: context,
+        builder: (context) => _DeleteHotelDialog(name: name),
+      ) ==
+      true;
+
+  Future<void> _deleteHotel([Map<String, dynamic>? target]) async {
+    final hotel = target ?? _detail ?? _selected;
     if (hotel == null || _detailBusy) return;
-    final id = hotel['hotelId'];
-    final confirmed = await _confirm(
-      'Delete ${hotel['hotelName']}?',
-      'This permanently removes this hotel’s rooms, bookings, guest records, photos and settings. The owner’s login account stays in Firebase. This cannot be undone.',
-      'Delete permanently',
-    );
-    if (!confirmed || !mounted) return;
-    setState(() => _detailBusy = true);
+    final id = '${hotel['hotelId']}';
+    if (_deletingIds.contains(id)) return;
+    if (!await _confirmDelete('${hotel['hotelName']}') || !mounted) return;
+    setState(() {
+      _detailBusy = true;
+      _deletingIds.add(id);
+    });
     try {
       await _api.call('adminDeleteHotel', {
         'hotelId': id,
@@ -315,17 +322,24 @@ class _AdminConsoleState extends State<AdminConsole> {
       });
       if (!mounted) return;
       setState(() {
-        _selected = null;
-        _detail = null;
+        if (_selected?['hotelId'] == id) {
+          _selected = null;
+          _detail = null;
+          _section = 1;
+        }
         _hotels.removeWhere((hotel) => hotel['hotelId'] == id);
-        _section = 1;
       });
-      showAppToast(context, 'Hotel deleted.', error: false);
+      showAppToast(context, 'Hotel deleted permanently.', error: false);
       await _loadHotels();
     } catch (e) {
       _fail(e);
     } finally {
-      if (mounted) setState(() => _detailBusy = false);
+      if (mounted) {
+        setState(() {
+          _detailBusy = false;
+          _deletingIds.remove(id);
+        });
+      }
     }
   }
 
@@ -422,7 +436,10 @@ class _AdminConsoleState extends State<AdminConsole> {
     }
   }
 
-  Widget _hotelList(List<Map<String, dynamic>> hotels) => Column(
+  Widget _hotelList(
+    List<Map<String, dynamic>> hotels, {
+    bool allowDelete = false,
+  }) => Column(
     children: [
       for (final h in hotels)
         Padding(
@@ -457,16 +474,43 @@ class _AdminConsoleState extends State<AdminConsole> {
                 ),
               ),
               isThreeLine: true,
-              trailing: Column(
+              trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  AdminStatus('${h['status']}'),
-                  const SizedBox(height: 4),
-                  const Icon(
-                    Icons.arrow_forward_rounded,
-                    size: 16,
-                    color: CustomColors.muted,
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AdminStatus('${h['status']}'),
+                      const SizedBox(height: 4),
+                      const Icon(
+                        Icons.arrow_forward_rounded,
+                        size: 16,
+                        color: CustomColors.muted,
+                      ),
+                    ],
                   ),
+                  if (allowDelete) ...[
+                    const SizedBox(width: 8),
+                    _deletingIds.contains('${h['hotelId']}')
+                        ? const SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: Padding(
+                              padding: EdgeInsets.all(10),
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : IconButton(
+                            tooltip: 'Delete hotel permanently',
+                            onPressed: _detailBusy
+                                ? null
+                                : () => _deleteHotel(h),
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              color: CustomColors.error,
+                            ),
+                          ),
+                  ],
                 ],
               ),
               onTap: () => _openHotel(h),
@@ -781,7 +825,7 @@ class _AdminConsoleState extends State<AdminConsole> {
           ],
         ),
         const SizedBox(height: 20),
-        _hotelList(hotels),
+        _hotelList(hotels, allowDelete: true),
         if (_hotelCursor != null)
           TextButton(
             onPressed: _busy ? null : () => _loadHotels(more: true),
@@ -1001,7 +1045,7 @@ class _AdminConsoleState extends State<AdminConsole> {
               ),
             ),
             CustomButton.outlineIcon(
-              onPressed: _detailBusy ? null : _deleteHotel,
+              onPressed: _detailBusy ? null : () => _deleteHotel(),
               icon: const Icon(
                 Icons.delete_outline_rounded,
                 color: CustomColors.error,
@@ -1369,7 +1413,15 @@ class _AdminConsoleState extends State<AdminConsole> {
       builder: (context) => AdminDialog(
         title: Text('$side ID photo'),
         content: FutureBuilder<Uint8List?>(
-          future: FirebaseStorage.instance.ref(path).getData(5 * 1024 * 1024),
+          // Served by the getGuestPhoto function, so the admin site needs
+          // no Storage bucket CORS rule for its own domain.
+          future: _api
+              .call('getGuestPhoto', {'path': path})
+              .then<Uint8List?>(
+                (photo) => photo['base64'] is String
+                    ? base64Decode(photo['base64'] as String)
+                    : null,
+              ),
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
               return const Padding(
@@ -1658,4 +1710,58 @@ class _AdminConsoleState extends State<AdminConsole> {
       ),
     );
   }
+}
+
+class _DeleteHotelDialog extends StatefulWidget {
+  const _DeleteHotelDialog({required this.name});
+  final String name;
+
+  @override
+  State<_DeleteHotelDialog> createState() => _DeleteHotelDialogState();
+}
+
+class _DeleteHotelDialogState extends State<_DeleteHotelDialog> {
+  final _typed = TextEditingController();
+
+  @override
+  void dispose() {
+    _typed.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AdminDialog(
+    title: Text('Permanently delete ${widget.name}?'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'This permanently removes the hotel and all its rooms, bookings, guest records, ID photos, bills, expenses, settings and membership. It will disappear from this list and cannot be restored. The owner can sign up again as a new hotel.',
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _typed,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Type DELETE to confirm',
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context, false),
+        child: const Text('Keep hotel'),
+      ),
+      CustomButton(
+        style: FilledButton.styleFrom(backgroundColor: CustomColors.error),
+        onPressed: _typed.text.trim() == 'DELETE'
+            ? () => Navigator.pop(context, true)
+            : null,
+        child: const Text('Delete permanently'),
+      ),
+    ],
+  );
 }

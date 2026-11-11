@@ -117,36 +117,52 @@ class CustomTextField extends StatelessWidget {
                     (icon == null ? null : Icon(icon, size: 21)),
           suffixIcon: onToggleVisibility == null
               ? original.suffixIcon
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (controller != null)
-                      ValueListenableBuilder<TextEditingValue>(
-                        valueListenable: controller!,
-                        builder: (context, value, _) => value.text.isEmpty
-                            ? const SizedBox.shrink()
-                            : IconButton(
+              // Suffix buttons must not pull focus away from the text field.
+              : ExcludeFocus(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (controller != null)
+                        // The clear button stays in the field (only hidden when
+                        // empty) so clearing never shifts the field or leaves a
+                        // stuck tooltip.
+                        ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: controller!,
+                          builder: (context, value, _) {
+                            final hasText = value.text.isNotEmpty;
+                            return Visibility(
+                              visible: hasText,
+                              maintainSize: true,
+                              maintainAnimation: true,
+                              maintainState: true,
+                              child: IconButton(
                                 tooltip: 'Clear password',
-                                onPressed: enabled
+                                onPressed: enabled && hasText
                                     ? () {
-                                        controller!.clear();
+                                        controller!.value =
+                                            const TextEditingValue();
                                         onChanged?.call('');
                                         focusNode?.requestFocus();
                                       }
                                     : null,
                                 icon: const Icon(Icons.clear_rounded, size: 20),
                               ),
+                            );
+                          },
+                        ),
+                      IconButton(
+                        tooltip: obscureText
+                            ? 'Show password'
+                            : 'Hide password',
+                        onPressed: enabled ? onToggleVisibility : null,
+                        icon: Icon(
+                          obscureText
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                        ),
                       ),
-                    IconButton(
-                      tooltip: obscureText ? 'Show password' : 'Hide password',
-                      onPressed: enabled ? onToggleVisibility : null,
-                      icon: Icon(
-                        obscureText
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
           filled: true,
           fillColor: CustomColors.fieldBackground,
