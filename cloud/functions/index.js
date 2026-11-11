@@ -2,6 +2,7 @@ const {onCall, HttpsError} = require('firebase-functions/v2/https');
 const {defineSecret} = require('firebase-functions/params');
 const {initializeApp} = require('firebase-admin/app');
 const {getFirestore} = require('firebase-admin/firestore');
+const {getAuth} = require('firebase-admin/auth');
 const {activateLicense} = require('./license');
 const {provisionHotel} = require('./onboarding');
 initializeApp();
@@ -53,6 +54,27 @@ exports.initializeEmptyHotel = onCall({region: 'asia-south1', maxInstances: 5}, 
     return {...result, setupVersion: 3};
   } catch {
     throw new HttpsError('failed-precondition', 'Hotel setup needs review');
+  }
+});
+
+// Email-era hotels move to the owner's OTP login when the saved mobile matches.
+const {claimHotelByPhone} = require('./phone_claim');
+exports.claimHotelByPhone = onCall({region: 'asia-south1', maxInstances: 5}, async (request) => {
+  const uid = request.auth?.uid;
+  const phone = request.auth?.token?.phone_number;
+  if (!uid || !phone) throw new HttpsError('unauthenticated', 'Mobile login required');
+  try {
+    const result = await claimHotelByPhone(getFirestore(), uid, phone, async (ownerUid) => {
+      try {
+        return await getAuth().getUser(ownerUid);
+      } catch (error) {
+        if (error?.code === 'auth/user-not-found') return null;
+        throw error;
+      }
+    });
+    return {claimed: result.claimed, reason: result.reason, businessId: result.claimed ? result.businessId : null};
+  } catch {
+    throw new HttpsError('failed-precondition', 'Hotel lookup needs review');
   }
 });
 

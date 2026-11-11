@@ -6,7 +6,9 @@ import '../widgets/hotel_ui.dart';
 import 'admin_console.dart';
 import '../app_navigator.dart';
 import '../screens/cloud_gate.dart';
-import '../services/password_auth_service.dart';
+import '../screens/hotel_signup_screen.dart';
+import '../services/phone_auth_service.dart';
+import '../widgets/phone_otp_form.dart';
 
 class HotelAdminApp extends StatelessWidget {
   const HotelAdminApp({super.key});
@@ -23,61 +25,82 @@ class HotelAdminApp extends StatelessWidget {
 class _AdminGate extends StatelessWidget {
   const _AdminGate();
   @override
-  Widget build(BuildContext context) => StreamBuilder<User?>(
-    stream: FirebaseAuth.instance.authStateChanges(),
-    builder: (context, snapshot) {
-      if (snapshot.connectionState == ConnectionState.waiting) {
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
-      }
-      if (snapshot.data == null) {
-        return const AdminLogin(initialHotelMode: true);
-      }
-      return FutureBuilder<IdTokenResult>(
-        future: snapshot.data!.getIdTokenResult(true),
-        builder: (context, token) {
-          if (token.connectionState != ConnectionState.done) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
-          }
-          if (token.hasError) {
-            return Scaffold(
-              body: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      'Could not verify access. Check your connection and sign in again.',
-                    ),
-                    TextButton(
-                      onPressed: () => FirebaseAuth.instance.signOut(),
-                      child: const Text('Sign out'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-          if (token.data?.claims?['admin'] != true) {
-            return CloudGate(
-              key: ValueKey(snapshot.data!.uid),
-              firebaseReady: true,
-            );
-          }
-          return AdminConsole(
-            onSignOut: () => FirebaseAuth.instance.signOut(),
-            email: snapshot.data!.email ?? 'Admin',
-          );
-        },
-      );
-    },
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: PhoneAuthService.instance.signingIn,
+    builder: (context, signingIn, _) => StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) => _route(context, snapshot, signingIn),
+    ),
   );
+
+  Widget _route(
+    BuildContext context,
+    AsyncSnapshot<User?> snapshot,
+    bool signingIn,
+  ) {
+    if (snapshot.connectionState == ConnectionState.waiting) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    // While an OTP login maps its hotel the form stays, so a rejected
+    // number keeps its message on screen.
+    if (snapshot.data == null || signingIn) {
+      return const AdminLogin(initialHotelMode: true);
+    }
+    return FutureBuilder<IdTokenResult>(
+      future: snapshot.data!.getIdTokenResult(true),
+      builder: (context, token) {
+        if (token.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (token.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Could not verify access. Check your connection and sign in again.',
+                  ),
+                  TextButton(
+                    onPressed: () => FirebaseAuth.instance.signOut(),
+                    child: const Text('Sign out'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        if (token.data?.claims?['admin'] != true) {
+          return CloudGate(
+            key: ValueKey(snapshot.data!.uid),
+            firebaseReady: true,
+          );
+        }
+        return AdminConsole(
+          onSignOut: () => FirebaseAuth.instance.signOut(),
+          email: snapshot.data!.email ?? 'Admin',
+        );
+      },
+    );
+  }
 }
 
 class AdminLogin extends StatefulWidget {
-  const AdminLogin({super.key, this.signIn, this.initialHotelMode = false});
+  const AdminLogin({
+    super.key,
+    this.signIn,
+    this.initialHotelMode = false,
+    this.phoneService,
+  });
   final bool initialHotelMode;
+
+  /// Super admin email/password sign-in override (tests).
   final Future<void> Function(String email, String password)? signIn;
+
+  /// Hotel owner OTP service override (tests).
+  final PhoneAuthService? phoneService;
   @override
   State<AdminLogin> createState() => _AdminLoginState();
 }
@@ -102,6 +125,14 @@ class _AdminLoginState extends State<AdminLogin> {
     super.dispose();
   }
 
+  Future<void> _openSignup() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => HotelSignupScreen(service: widget.phoneService),
+      ),
+    );
+  }
+
   Future<void> _login() async {
     if (_busy) return;
     if (!_email.text.trim().contains('@') || _password.text.isEmpty) {
@@ -115,11 +146,6 @@ class _AdminLoginState extends State<AdminLogin> {
     try {
       if (widget.signIn != null) {
         await widget.signIn!(_email.text.trim(), _password.text);
-      } else if (_hotelMode) {
-        await PasswordAuthService.instance.login(
-          _email.text.trim(),
-          _password.text,
-        );
       } else {
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: _email.text.trim(),
@@ -221,47 +247,66 @@ class _AdminLoginState extends State<AdminLogin> {
                         const SizedBox(height: 8),
                         Text(
                           _hotelMode
-                              ? 'Use your app account to manage rooms, bookings and reports.'
+                              ? 'Log in with your mobile number and OTP to manage rooms, bookings and reports.'
                               : 'All hotels, analytics and license keys. Admin access only.',
                           style: TextStyle(color: CustomColors.muted),
                         ),
                         const SizedBox(height: 24),
-                        CustomTextField(
-                          controller: _email,
-                          label: _hotelMode ? 'Login email' : 'Admin email',
-                          icon: Icons.alternate_email_rounded,
-                          keyboardType: TextInputType.emailAddress,
-                          enabled: !_busy,
-                          autofillHints: const [AutofillHints.username],
-                        ),
-                        CustomTextField(
-                          controller: _password,
-                          focusNode: _passwordFocus,
-                          onChanged: (_) {
-                            if (_error != null) setState(() => _error = null);
-                          },
-                          label: 'Password',
-                          icon: Icons.lock_outline_rounded,
-                          enabled: !_busy,
-                          obscureText: !_visible,
-                          onToggleVisibility: () =>
-                              setState(() => _visible = !_visible),
-                          autofillHints: const [AutofillHints.password],
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => _login(),
-                        ),
-                        if (_error != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
-                            child: Text(
-                              _error!,
-                              style: const TextStyle(color: CustomColors.error),
+                        if (_hotelMode) ...[
+                          PhoneOtpForm(
+                            isSignup: false,
+                            service: widget.phoneService,
+                            onBusyChanged: (busy) =>
+                                setState(() => _busy = busy),
+                          ),
+                          const SizedBox(height: 8),
+                          CustomButton.text(
+                            onPressed: _busy ? null : _openSignup,
+                            child: const Text(
+                              'New to Hotel Pro? Create account',
+                              textAlign: TextAlign.center,
                             ),
                           ),
-                        CustomButton(
-                          onPressed: _busy ? null : _login,
-                          child: Text(_busy ? 'Signing in…' : 'Sign in'),
-                        ),
+                        ] else ...[
+                          CustomTextField(
+                            controller: _email,
+                            label: _hotelMode ? 'Login email' : 'Admin email',
+                            icon: Icons.alternate_email_rounded,
+                            keyboardType: TextInputType.emailAddress,
+                            enabled: !_busy,
+                            autofillHints: const [AutofillHints.username],
+                          ),
+                          CustomTextField(
+                            controller: _password,
+                            focusNode: _passwordFocus,
+                            onChanged: (_) {
+                              if (_error != null) setState(() => _error = null);
+                            },
+                            label: 'Password',
+                            icon: Icons.lock_outline_rounded,
+                            enabled: !_busy,
+                            obscureText: !_visible,
+                            onToggleVisibility: () =>
+                                setState(() => _visible = !_visible),
+                            autofillHints: const [AutofillHints.password],
+                            textInputAction: TextInputAction.done,
+                            onSubmitted: (_) => _login(),
+                          ),
+                          if (_error != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Text(
+                                _error!,
+                                style: const TextStyle(
+                                  color: CustomColors.error,
+                                ),
+                              ),
+                            ),
+                          CustomButton(
+                            onPressed: _busy ? null : _login,
+                            child: Text(_busy ? 'Signing in…' : 'Sign in'),
+                          ),
+                        ],
                       ],
                     ),
                   ),

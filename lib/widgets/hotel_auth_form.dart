@@ -1,25 +1,24 @@
 import 'custom_button.dart';
 import '../screens/hotel_signup_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-import '../services/password_auth_service.dart';
+import '../services/phone_auth_service.dart';
 import '../theme/custom_colors.dart';
 import '../utils/responsive_ui.dart';
-import 'custom_text_field.dart';
+import 'phone_otp_form.dart';
 
+/// App login and signup: mobile number (+91) and OTP only.
 class HotelAuthForm extends StatefulWidget {
   const HotelAuthForm({
     super.key,
     required this.onReady,
     required this.isSignup,
-    this.initialEmail = '',
+    this.service,
   });
 
   final bool isSignup;
-  final String initialEmail;
-
   final VoidCallback onReady;
+  final PhoneAuthService? service;
 
   @override
   State<HotelAuthForm> createState() => _HotelAuthFormState();
@@ -27,146 +26,16 @@ class HotelAuthForm extends StatefulWidget {
 
 class _HotelAuthFormState extends State<HotelAuthForm> {
   bool get _register => widget.isSignup;
-
-  @override
-  void initState() {
-    super.initState();
-    _email.text = widget.initialEmail;
-  }
-
   bool _busy = false;
-  final _formKey = GlobalKey<FormState>();
-  String? _error;
-  final _owner = TextEditingController();
-  final _hotel = TextEditingController();
-  final _mobile = TextEditingController();
-  final _email = TextEditingController();
-  final _password = TextEditingController();
-  final _confirm = TextEditingController();
-  bool _hidePassword = true;
-  bool _hideConfirm = true;
-  String? _success;
-
-  @override
-  void dispose() {
-    _owner.dispose();
-    _hotel.dispose();
-    _mobile.dispose();
-    _email.dispose();
-    _password.dispose();
-    _confirm.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-    FocusScope.of(context).unfocus();
-    setState(() {
-      _busy = true;
-      _error = null;
-      _success = null;
-    });
-    try {
-      if (_register) {
-        await PasswordAuthService.instance.signup(
-          email: _email.text,
-          password: _password.text,
-          owner: _owner.text,
-          hotel: _hotel.text,
-          mobile: _mobile.text.trim(),
-        );
-        if (!mounted) return;
-        Navigator.of(context).pop(_email.text.trim());
-      } else {
-        await PasswordAuthService.instance.login(_email.text, _password.text);
-        if (mounted) widget.onReady();
-      }
-    } catch (error) {
-      if (mounted) setState(() => _error = PasswordAuthService.message(error));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Widget _field(
-    TextEditingController controller,
-    String label,
-    IconData icon, {
-    TextInputType? keyboard,
-  }) {
-    return CustomTextField(
-      controller: controller,
-      margin: const EdgeInsets.only(bottom: 16),
-      label: label,
-      icon: icon,
-      enabled: !_busy,
-      countryCode: controller == _mobile ? '+91' : null,
-      keyboardType: keyboard,
-      obscureText: controller == _password
-          ? _hidePassword
-          : controller == _confirm
-          ? _hideConfirm
-          : false,
-      onToggleVisibility: controller == _password
-          ? () => setState(() => _hidePassword = !_hidePassword)
-          : controller == _confirm
-          ? () => setState(() => _hideConfirm = !_hideConfirm)
-          : null,
-      autofillHints: controller == _mobile
-          ? const [AutofillHints.telephoneNumberNational]
-          : controller == _email
-          ? const [AutofillHints.username, AutofillHints.email]
-          : controller == _password || controller == _confirm
-          ? [_register ? AutofillHints.newPassword : AutofillHints.password]
-          : null,
-      inputFormatters: controller == _mobile
-          ? [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(10),
-            ]
-          : null,
-      validator: (value) {
-        if (value == null || value.trim().isEmpty) return 'Please enter $label';
-        if (controller == _email &&
-            !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value.trim())) {
-          return 'Please enter a valid email address';
-        }
-        if (controller == _password && _register && value.length < 8) {
-          return 'Use at least 8 characters';
-        }
-        if (controller == _confirm && value != _password.text) {
-          return 'Passwords do not match';
-        }
-        if (controller == _mobile &&
-            !RegExp(r'^[6-9][0-9]{9}$').hasMatch(value.trim())) {
-          return 'Enter a valid 10-digit mobile number';
-        }
-        return null;
-      },
-    );
-  }
 
   Future<void> _openSignup() async {
     if (_busy) return;
     FocusScope.of(context).unfocus();
-    setState(() {
-      _error = null;
-      _success = null;
-    });
-    final email = await Navigator.of(context).push<String>(
+    await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (_) => HotelSignupScreen(initialEmail: _email.text.trim()),
+        builder: (_) => HotelSignupScreen(service: widget.service),
       ),
     );
-    if (!mounted || email == null) return;
-    setState(() {
-      _formKey.currentState?.reset();
-      _email.text = email;
-      _password.clear();
-      _hidePassword = true;
-      _success =
-          'Account created successfully. Please log in with your email and password.';
-    });
   }
 
   @override
@@ -313,97 +182,18 @@ class _HotelAuthFormState extends State<HotelAuthForm> {
                 style: const TextStyle(color: CustomColors.muted, fontSize: 13),
               ),
               const SizedBox(height: 24),
-              Form(
-                key: _formKey,
-                child: AutofillGroup(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (_register) ...[
-                        _field(
-                          _owner,
-                          'Owner name',
-                          Icons.person_outline_rounded,
-                        ),
-                        _field(_hotel, 'Hotel name', Icons.apartment_rounded),
-                      ],
-                      if (_register)
-                        _field(
-                          _mobile,
-                          'Mobile number',
-                          Icons.phone_rounded,
-                          keyboard: TextInputType.phone,
-                        ),
-                      _field(
-                        _email,
-                        'Login ID (email)',
-                        Icons.alternate_email_rounded,
-                        keyboard: TextInputType.emailAddress,
-                      ),
-                      _field(_password, 'Password', Icons.lock_outline_rounded),
-                      if (_register)
-                        _field(
-                          _confirm,
-                          'Confirm password',
-                          Icons.lock_outline_rounded,
-                        ),
-                      if (_success != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 16),
-                          child: Text(
-                            _success!,
-                            style: const TextStyle(color: CustomColors.primary),
-                          ),
-                        ),
-                      if (_error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 16),
-                          child: Text(
-                            _error!,
-                            style: const TextStyle(color: CustomColors.error),
-                          ),
-                        ),
-                      const SizedBox(height: 4),
-                      CustomButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: CustomColors.button,
-                          foregroundColor: CustomColors.onButton,
-                          disabledBackgroundColor:
-                              CustomColors.disabledBackground,
-                          disabledForegroundColor: CustomColors.muted,
-                          padding: const EdgeInsets.symmetric(vertical: 18),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                        ),
-                        onPressed: _busy ? null : _submit,
-                        child: _busy
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: CustomColors.onButton,
-                                ),
-                              )
-                            : Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      _register ? 'Create account' : 'Log in',
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  const Icon(
-                                    Icons.arrow_forward_rounded,
-                                    size: 19,
-                                  ),
-                                ],
-                              ),
-                      ),
-                    ],
+              PhoneOtpForm(
+                isSignup: _register,
+                service: widget.service,
+                onBusyChanged: (busy) => setState(() => _busy = busy),
+                buttonStyle: FilledButton.styleFrom(
+                  backgroundColor: CustomColors.button,
+                  foregroundColor: CustomColors.onButton,
+                  disabledBackgroundColor: CustomColors.disabledBackground,
+                  disabledForegroundColor: CustomColors.muted,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
                   ),
                 ),
               ),

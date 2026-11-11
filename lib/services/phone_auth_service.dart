@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../app_navigator.dart';
@@ -65,7 +67,28 @@ class PhoneAuthService {
       firebaseReady?.call() ?? Firebase.apps.isNotEmpty;
   int _otpRequestGeneration = 0;
   Future<PhoneAuthOutcome>? _signInFuture;
+  ConfirmationResult? _webConfirmation;
+
+  /// Owner/hotel details from the signup form. When set, the next OTP
+  /// sign-in may create a new hotel; login always clears it.
   Map<String, String>? signupDraft;
+
+  /// True while an OTP credential is being exchanged and the hotel mapped.
+  /// Gates keep the login form on screen until this finishes.
+  final ValueNotifier<bool> signingIn = ValueNotifier<bool>(false);
+
+  /// Why the last OTP sign-in was rejected after Firebase Auth succeeded
+  /// (for example: no hotel for this number). The login form shows it once.
+  String? lastSignInError;
+
+  static const String countryCode = '+91';
+
+  /// `9876543210` -> `+919876543210`.
+  static String indianE164(String tenDigits) =>
+      '$countryCode${tenDigits.replaceAll(RegExp(r'\D'), '')}';
+
+  static bool isValidIndianMobile(String value) =>
+      RegExp(r'^[6-9][0-9]{9}$').hasMatch(value.trim());
 
   /// Auth emits its user before the first-login mapping transaction finishes.
   /// Bootstrap must wait for that verified new-owner decision, not race it.
@@ -83,6 +106,7 @@ class PhoneAuthService {
     _otpGate.finish();
     PhoneAuthSession.clear();
     signupDraft = null;
+    _webConfirmation = null;
     if (HotelDataBuffer.cloudOnly) HotelDataBuffer.clearSession();
     HotelFirestoreService.instance.clearAccount();
     if (!_isFirebaseReady) {
@@ -173,6 +197,16 @@ class PhoneAuthService {
         onError('Firebase is not ready on this device.');
         return;
       }
+      if (kIsWeb) {
+        // Web has no verifyPhoneNumber: Firebase shows reCAPTCHA, sends the
+        // SMS and returns a ConfirmationResult that confirms the code.
+        debugPrint('[PHONE_AUTH] sending OTP (web reCAPTCHA)');
+        final confirmation = await _auth.signInWithPhoneNumber(e164Phone);
+        if (!isCurrent()) return;
+        _webConfirmation = confirmation;
+        onCodeSent(PhoneCodeSent(verificationId: confirmation.verificationId));
+        return;
+      }
       // Let Firebase choose native Play Integrity/reCAPTCHA. Starting another
       // request from verificationFailed races the SDK's existing browser flow.
       await _auth.setSettings(
@@ -192,7 +226,7 @@ class PhoneAuthService {
             final PhoneAuthOutcome outcome = await _signIn(credential);
             onAutoVerified(outcome);
           } catch (error) {
-            onError(humanize(error));
+            onError(signInMessage(error));
           }
         },
         verificationFailed: (FirebaseAuthException error) async {
@@ -238,28 +272,63 @@ class PhoneAuthService {
     required String verificationId,
     required String smsCode,
   }) async {
+    final confirmation = _webConfirmation;
+    if (kIsWeb && confirmation != null) {
+      return _signInWith(() => confirmation.confirm(smsCode.trim()));
+    }
     final PhoneAuthCredential credential = PhoneAuthProvider.credential(
       verificationId: verificationId,
-      smsCode: smsCode,
+      smsCode: smsCode.trim(),
     );
     return _signIn(credential);
   }
 
-  Future<PhoneAuthOutcome> _signIn(PhoneAuthCredential credential) async {
+  Future<PhoneAuthOutcome> _signIn(PhoneAuthCredential credential) =>
+      _signInWith(() => _auth.signInWithCredential(credential));
+
+  Future<PhoneAuthOutcome> _signInWith(
+    Future<UserCredential> Function() exchange,
+  ) async {
     final active = _signInFuture;
     if (active != null) return active;
-    final future = _finishSignIn(credential);
+    lastSignInError = null;
+    final future = _finishSignIn(exchange);
     _signInFuture = future;
+    signingIn.value = true;
     try {
       return await future;
+    } catch (error) {
+      lastSignInError = signInMessage(error);
+      rethrow;
     } finally {
       _signInFuture = null;
+      signingIn.value = false;
     }
   }
 
-  Future<PhoneAuthOutcome> _finishSignIn(PhoneAuthCredential credential) async {
-    final UserCredential userCredential = await FirebaseAuth.instance
-        .signInWithCredential(credential);
+  /// Hotels registered with the old email login belong to an email UID.
+  /// The server moves such a hotel to this verified mobile when the hotel's
+  /// saved mobile matches exactly. Missing function or no match: false.
+  Future<bool> _claimLegacyHotel() async {
+    try {
+      final result = await FirebaseFunctions.instanceFor(
+        region: 'asia-south1',
+      ).httpsCallable('claimHotelByPhone').call();
+      final data = result.data;
+      final claimed = data is Map && data['claimed'] == true;
+      debugPrint('[PHONE_AUTH] legacy hotel claim claimed=$claimed');
+      return claimed;
+    } catch (error) {
+      debugPrint('[PHONE_AUTH] legacy hotel claim skipped: $error');
+      return false;
+    }
+  }
+
+  Future<PhoneAuthOutcome> _finishSignIn(
+    Future<UserCredential> Function() exchange,
+  ) async {
+    final UserCredential userCredential = await exchange();
+    _webConfirmation = null;
     final User? user = userCredential.user;
     if (user == null) {
       throw FirebaseAuthException(
@@ -268,15 +337,35 @@ class PhoneAuthService {
       );
     }
     PhoneAuthSession.capture(user);
-    if (signupDraft != null) {
-      HotelSettingsStore.hotelName = signupDraft!['hotelName']!;
-      await user.updateDisplayName(signupDraft!['ownerName']);
+    final draft = signupDraft;
+    final bool isSignup = draft != null;
+    debugPrint('[PHONE_AUTH] signed in signup=$isSignup');
+    var claimed = false;
+    if (userCredential.additionalUserInfo?.isNewUser == true) {
+      claimed = await _claimLegacyHotel();
     }
-    debugPrint('[PHONE_AUTH] signed in');
-    final account = await HotelFirestoreService.instance.ensureOwnerBusiness(
-      user,
-      allowCreate: signupDraft != null,
+    if (isSignup && !claimed) {
+      final owner = (draft['ownerName'] ?? '').trim();
+      final hotel = (draft['hotelName'] ?? '').trim();
+      if (hotel.isNotEmpty) HotelSettingsStore.hotelName = hotel;
+      if (owner.isNotEmpty && user.displayName != owner) {
+        await user.updateDisplayName(owner);
+        await user.reload();
+      }
+    }
+    final firestore = HotelFirestoreService.instance;
+    final User signedIn = _auth.currentUser ?? user;
+    var account = await firestore.ensureOwnerBusiness(
+      signedIn,
+      allowCreate: isSignup,
+      contactPhone: user.phoneNumber,
     );
+    if ((account == null || firestore.lastError != null) &&
+        !isSignup &&
+        !claimed &&
+        await _claimLegacyHotel()) {
+      account = await firestore.ensureOwnerBusiness(signedIn);
+    }
     PhoneAuthSession.businessId = account?.businessId;
     if (account == null || HotelFirestoreService.instance.lastError != null) {
       final message =
@@ -297,6 +386,14 @@ class PhoneAuthService {
       );
     });
     return PhoneAuthOutcome(uid: user.uid, phoneNumber: user.phoneNumber ?? '');
+  }
+
+  /// Message for the login/signup form, for any error from [verifyOtp].
+  static String signInMessage(Object error) {
+    if (error is StateError) {
+      return error.message.replaceFirst(RegExp(r'^(Bad state: )+'), '');
+    }
+    return humanize(error);
   }
 
   static String humanize(Object error) {
@@ -322,6 +419,12 @@ class PhoneAuthService {
           return 'No internet connection. Check network and retry.';
         case 'user-disabled':
           return 'This account is disabled.';
+        case 'operation-not-allowed':
+          return 'Mobile OTP login is not enabled yet. Please contact support.';
+        case 'unauthorized-domain':
+          return 'This website is not allowed to send OTP yet. Please contact support.';
+        case 'missing-verification-code':
+          return 'Please enter the 6-digit OTP.';
         case 'web-context-already-presented':
           return 'A verification window is already open. Complete or close it before trying again.';
         case 'web-context-cancelled':

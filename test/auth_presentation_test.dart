@@ -4,125 +4,143 @@ import 'package:my_first_app/screens/cpanel_auth_screen.dart';
 import 'package:my_first_app/screens/splash_screen.dart';
 import 'package:my_first_app/screens/hotel_signup_screen.dart';
 import 'package:my_first_app/theme/app_theme.dart';
+import 'package:my_first_app/widgets/hotel_auth_form.dart';
+
+import 'support/fake_phone_auth.dart';
 
 void main() {
-  testWidgets('login validates empty fields and switches to signup', (
+  testWidgets('login is mobile OTP only and switches to signup', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(360, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    final phone = FakePhoneAuth();
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: CpanelAuthScreen(onReady: () {}),
+        home: HotelAuthForm(isSignup: false, service: phone, onReady: () {}),
       ),
     );
-    final context = tester.element(find.byType(CpanelAuthScreen));
+    final context = tester.element(find.byType(HotelAuthForm));
     expect(Theme.of(context).textTheme.bodyMedium?.fontFamily, 'Poppins');
-    await tester.ensureVisible(find.text('Log in'));
-    await tester.tap(find.text('Log in'));
+    expect(find.text('+91'), findsOneWidget);
+    expect(find.text('Login ID (email)'), findsNothing);
+    expect(find.text('Password'), findsNothing);
+    await tester.ensureVisible(find.text('Send OTP'));
+    await tester.tap(find.text('Send OTP'));
     await tester.pump();
-    expect(find.text('Please enter Login ID (email)'), findsOneWidget);
+    expect(find.text('Please enter Mobile number'), findsOneWidget);
+    await tester.enterText(find.byType(TextFormField).first, '12345');
+    await tester.tap(find.text('Send OTP'));
+    await tester.pump();
+    expect(find.text('Enter a valid 10-digit mobile number'), findsOneWidget);
+    expect(phone.sent, isEmpty);
     await tester.ensureVisible(find.text('New to Hotel Pro? Create account'));
     await tester.tap(find.text('New to Hotel Pro? Create account'));
     await tester.pumpAndSettle();
     expect(find.byType(HotelSignupScreen), findsOneWidget);
-    expect(find.text('Sign up'), findsNothing);
     expect(find.text('Make yourself at home.'), findsOneWidget);
     expect(find.text('Owner name'), findsOneWidget);
+    expect(find.text('Hotel name'), findsOneWidget);
     expect(find.text('+91'), findsOneWidget);
-    expect(find.text('Code'), findsNothing);
-    expect(find.text('Confirm password'), findsOneWidget);
-    expect(find.text('Password'), findsOneWidget);
+    expect(find.text('Confirm password'), findsNothing);
+    expect(find.text('Password'), findsNothing);
+    expect(find.text('Login ID (email)'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('signup uses a separate route and fresh state on reopening', (
+  testWidgets('signup sends OTP with owner details and verifies it', (
     tester,
   ) async {
+    final phone = FakePhoneAuth();
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: CpanelAuthScreen(onReady: () {}),
+        home: HotelSignupScreen(service: phone),
       ),
     );
     await tester.enterText(
-      find.byType(TextFormField).at(0),
-      'owner@example.com',
+      find.widgetWithText(TextFormField, 'Owner name'),
+      'Asha Devi',
     );
     await tester.enterText(
-      find.byType(TextFormField).at(1),
-      'LoginPassword123',
+      find.widgetWithText(TextFormField, 'Hotel name'),
+      'Lake View',
     );
-    await tester.ensureVisible(find.text('New to Hotel Pro? Create account'));
-    await tester.tap(find.text('New to Hotel Pro? Create account'));
-    await tester.pumpAndSettle();
-    expect(find.byType(HotelSignupScreen), findsOneWidget);
-    expect(
-      tester
-          .widget<TextFormField>(find.byType(TextFormField).at(3))
-          .controller!
-          .text,
-      'owner@example.com',
-    );
-    await tester.ensureVisible(find.byType(TextFormField).at(0));
     await tester.enterText(
-      find.byType(TextFormField).at(0),
-      'Unfinished owner',
+      find.widgetWithText(TextFormField, 'Mobile number'),
+      '9876543210',
     );
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    expect(find.byType(HotelSignupScreen), findsNothing);
-    expect(
-      tester
-          .widget<TextFormField>(find.byType(TextFormField).at(1))
-          .controller!
-          .text,
-      'LoginPassword123',
+    await tester.ensureVisible(find.text('Send OTP'));
+    await tester.tap(find.text('Send OTP'));
+    await tester.pump();
+    expect(phone.sent, ['+919876543210']);
+    expect(phone.draftsAtSend.single, {
+      'ownerName': 'Asha Devi',
+      'hotelName': 'Lake View',
+      'mobile': '9876543210',
+    });
+    expect(find.text('OTP sent to +919876543210'), findsOneWidget);
+    expect(find.text('Resend OTP in 30s'), findsOneWidget);
+    await tester.ensureVisible(find.text('Verify & create account'));
+    await tester.tap(find.text('Verify & create account'));
+    await tester.pump();
+    expect(find.text('Please enter the 6-digit OTP.'), findsOneWidget);
+    expect(phone.verifiedCode, isNull);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Enter OTP'),
+      '654321',
     );
-    await tester.ensureVisible(find.text('New to Hotel Pro? Create account'));
-    await tester.tap(find.text('New to Hotel Pro? Create account'));
-    await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<TextFormField>(find.byType(TextFormField).at(0))
-          .controller!
-          .text,
-      isEmpty,
-    );
-    expect(
-      tester
-          .widget<TextFormField>(find.byType(TextFormField).at(4))
-          .controller!
-          .text,
-      isEmpty,
-    );
-    Navigator.of(
-      tester.element(find.byType(HotelSignupScreen)),
-    ).pop('new-owner@example.com');
-    await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<TextFormField>(find.byType(TextFormField).at(0))
-          .controller!
-          .text,
-      'new-owner@example.com',
-    );
-    expect(
-      tester
-          .widget<TextFormField>(find.byType(TextFormField).at(1))
-          .controller!
-          .text,
-      isEmpty,
-    );
-    expect(
-      find.text(
-        'Account created successfully. Please log in with your email and password.',
+    await tester.tap(find.text('Verify & create account'));
+    await tester.pump();
+    expect(phone.verifiedCode, '654321');
+
+    await tester.pump(const Duration(seconds: 31));
+    await tester.ensureVisible(find.text('Resend OTP'));
+    await tester.tap(find.text('Resend OTP'));
+    await tester.pump();
+    expect(phone.sent.length, 2);
+    expect(phone.resendTokens.last, 7);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a number without a hotel shows the sign up hint', (
+    tester,
+  ) async {
+    final phone = FakePhoneAuth()
+      ..verifyError = StateError(
+        'Bad state: No hotel account found. Choose Sign up to create your hotel.',
+      );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: HotelAuthForm(isSignup: false, service: phone, onReady: () {}),
       ),
+    );
+    await tester.enterText(find.byType(TextFormField).first, '9876543210');
+    await tester.tap(find.text('Send OTP'));
+    await tester.pump();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Enter OTP'),
+      '111111',
+    );
+    await tester.ensureVisible(find.text('Verify & log in'));
+    await tester.tap(find.text('Verify & log in'));
+    await tester.pump();
+    expect(
+      find.text('No hotel account found. Choose Sign up to create your hotel.'),
       findsOneWidget,
     );
+    expect(phone.draftsAtSend.single, isNull);
+    await tester.ensureVisible(find.text('Change number'));
+    await tester.tap(find.text('Change number'));
+    await tester.pump();
+    expect(find.text('+91'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });
 
@@ -148,7 +166,7 @@ void main() {
       await tester.ensureVisible(find.text('New to Hotel Pro? Create account'));
       await tester.tap(find.text('New to Hotel Pro? Create account'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Create account'));
+      await tester.ensureVisible(find.text('Send OTP'));
       expect(find.text('+91'), findsOneWidget);
       expect(tester.takeException(), isNull);
       // An open keyboard and larger text must keep the submit button reachable.
@@ -167,7 +185,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Create account'));
+      await tester.ensureVisible(find.text('Send OTP'));
       expect(tester.takeException(), isNull);
     });
   }
