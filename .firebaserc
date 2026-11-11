@@ -19,6 +19,9 @@
       "hosting": {
         "admin": [
           "hotel-pro-admin-731313332286"
+        ],
+        "superadmin": [
+          "hotel-pro-superadmin"
         ]
       }
     }
