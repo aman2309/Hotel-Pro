@@ -97,12 +97,21 @@ void main() {
       await tester.ensureVisible(delete);
       await tester.tap(delete);
       await tester.pumpAndSettle();
-      expect(find.text('Delete Test Hotel?'), findsOneWidget);
-      await tester.tap(find.text('Keep unchanged'));
+      expect(find.text('Permanently delete Test Hotel?'), findsOneWidget);
+      await tester.tap(find.text('Keep hotel'));
       await tester.pumpAndSettle();
       expect(api.calls, isNot(contains('adminDeleteHotel')));
       await tester.tap(delete);
       await tester.pumpAndSettle();
+      // The delete button stays off until DELETE is typed.
+      await tester.tap(find.text('Delete permanently'));
+      await tester.pumpAndSettle();
+      expect(api.calls, isNot(contains('adminDeleteHotel')));
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Type DELETE to confirm'),
+        'DELETE',
+      );
+      await tester.pump();
       await tester.tap(find.text('Delete permanently'));
       await tester.pumpAndSettle();
       expect(api.sent['adminDeleteHotel'], {
@@ -113,6 +122,48 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+  testWidgets('hotels list deletes a hotel permanently from its row', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final api = FakeAdminApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: AdminConsole(
+          email: 'admin@example.test',
+          onSignOut: () async {},
+          api: api,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // The dashboard preview has no delete; the full Hotels list does.
+    expect(find.byTooltip('Delete hotel permanently'), findsNothing);
+    await tester.ensureVisible(find.text('View all hotels →'));
+    await tester.tap(find.text('View all hotels →'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Delete hotel permanently'));
+    await tester.tap(find.byTooltip('Delete hotel permanently'));
+    await tester.pumpAndSettle();
+    expect(find.text('Permanently delete Test Hotel?'), findsOneWidget);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Type DELETE to confirm'),
+      'DELETE',
+    );
+    await tester.pump();
+    await tester.tap(find.text('Delete permanently'));
+    await tester.pumpAndSettle();
+    expect(api.sent['adminDeleteHotel'], {
+      'hotelId': 'hotel-test',
+      'confirmHotelId': 'hotel-test',
+    });
+    expect(find.text('Test Hotel'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('admin issues a one-time copyable key through the server', (
     tester,
   ) async {
