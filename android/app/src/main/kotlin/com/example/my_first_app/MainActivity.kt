@@ -17,6 +17,16 @@ import kotlin.math.max
 class MainActivity : FlutterActivity() {
     private val ocrExecutor = Executors.newSingleThreadExecutor()
 
+    /**
+     * Back on the first screen sends the app to the background instead of
+     * finishing the activity, so reopening it from Recents resumes the same
+     * screen without reloading. Inner screens and dialogs still pop normally.
+     */
+    override fun popSystemNavigator(): Boolean {
+        moveTaskToBack(true)
+        return true
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "hotel_pro/ocr")
