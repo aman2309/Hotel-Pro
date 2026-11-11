@@ -15,7 +15,7 @@ Future<void> main() async {
       persistenceEnabled: false,
     );
     await LicenseService.instance.init();
-    runApp(const HotelAdminApp());
+    runApp(HotelAdminApp(portal: WebPortal.fromEnvironment()));
   } catch (_) {
     runApp(
       const MaterialApp(

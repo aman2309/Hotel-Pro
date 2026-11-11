@@ -10,20 +10,36 @@ import '../screens/hotel_signup_screen.dart';
 import '../services/phone_auth_service.dart';
 import '../widgets/phone_otp_form.dart';
 
+/// Each web site serves exactly one portal: hotel owners (mobile OTP) or
+/// the super admin console (email + password). Chosen at build time with
+/// `--dart-define=WEB_PORTAL=superadmin`; anything else is the hotel site.
+enum WebPortal {
+  hotel,
+  superAdmin;
+
+  static WebPortal fromEnvironment() =>
+      const String.fromEnvironment('WEB_PORTAL') == 'superadmin'
+      ? WebPortal.superAdmin
+      : WebPortal.hotel;
+}
+
 class HotelAdminApp extends StatelessWidget {
-  const HotelAdminApp({super.key});
+  const HotelAdminApp({super.key, this.portal = WebPortal.hotel});
+  final WebPortal portal;
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Hotel Pro',
+    title: portal == WebPortal.superAdmin ? 'Hotel Pro Admin' : 'Hotel Pro',
     navigatorKey: appNavigatorKey,
     debugShowCheckedModeBanner: false,
     theme: AppTheme.light,
-    home: const _AdminGate(),
+    home: _AdminGate(portal: portal),
   );
 }
 
 class _AdminGate extends StatelessWidget {
-  const _AdminGate();
+  const _AdminGate({required this.portal});
+  final WebPortal portal;
+  bool get _hotel => portal == WebPortal.hotel;
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: PhoneAuthService.instance.signingIn,
@@ -43,8 +59,8 @@ class _AdminGate extends StatelessWidget {
     }
     // While an OTP login maps its hotel the form stays, so a rejected
     // number keeps its message on screen.
-    if (snapshot.data == null || signingIn) {
-      return const AdminLogin(initialHotelMode: true);
+    if (snapshot.data == null || (_hotel && signingIn)) {
+      return AdminLogin(hotelMode: _hotel);
     }
     return FutureBuilder<IdTokenResult>(
       future: snapshot.data!.getIdTokenResult(true),
@@ -72,7 +88,18 @@ class _AdminGate extends StatelessWidget {
             ),
           );
         }
-        if (token.data?.claims?['admin'] != true) {
+        final isAdmin = token.data?.claims?['admin'] == true;
+        if (_hotel && isAdmin) {
+          return const _WrongPortal(
+            'This is the hotel login. Super admin uses the separate admin website.',
+          );
+        }
+        if (!_hotel && !isAdmin) {
+          return const _WrongPortal(
+            'This account does not have admin access. Hotel owners log in on the hotel website with their mobile number.',
+          );
+        }
+        if (_hotel) {
           return CloudGate(
             key: ValueKey(snapshot.data!.uid),
             firebaseReady: true,
@@ -87,14 +114,40 @@ class _AdminGate extends StatelessWidget {
   }
 }
 
+class _WrongPortal extends StatelessWidget {
+  const _WrongPortal(this.message);
+  final String message;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: () => FirebaseAuth.instance.signOut(),
+              child: const Text('Sign out'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class AdminLogin extends StatefulWidget {
   const AdminLogin({
     super.key,
     this.signIn,
-    this.initialHotelMode = false,
+    this.hotelMode = false,
     this.phoneService,
   });
-  final bool initialHotelMode;
+
+  /// true: hotel owner OTP login. false: super admin email + password.
+  final bool hotelMode;
 
   /// Super admin email/password sign-in override (tests).
   final Future<void> Function(String email, String password)? signIn;
@@ -110,12 +163,7 @@ class _AdminLoginState extends State<AdminLogin> {
   final _passwordFocus = FocusNode();
   bool _busy = false, _visible = false;
   String? _error;
-  late bool _hotelMode;
-  @override
-  void initState() {
-    super.initState();
-    _hotelMode = widget.initialHotelMode;
-  }
+  bool get _hotelMode => widget.hotelMode;
 
   @override
   void dispose() {
@@ -209,28 +257,6 @@ class _AdminLoginState extends State<AdminLogin> {
                   ),
                 ),
                 const SizedBox(height: 32),
-                SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(
-                      value: true,
-                      icon: Icon(Icons.hotel_outlined),
-                      label: Text('Hotel Login'),
-                    ),
-                    ButtonSegment(
-                      value: false,
-                      icon: Icon(Icons.admin_panel_settings_outlined),
-                      label: Text('Super Admin'),
-                    ),
-                  ],
-                  selected: {_hotelMode},
-                  onSelectionChanged: _busy
-                      ? null
-                      : (values) => setState(() {
-                          _hotelMode = values.single;
-                          _error = null;
-                          _password.clear();
-                        }),
-                ),
                 const SizedBox(height: 20),
                 CustomSurface(
                   child: AutofillGroup(
