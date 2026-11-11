@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -35,7 +37,7 @@ class _AdminConsoleState extends State<AdminConsole> {
   int _section = 0, _days = 30, _detailTicket = 0;
   String _hotelFilter = 'All', _collection = 'rooms';
   String? _hotelCursor, _keyCursor, _auditCursor, _recordCursor, _error;
-  Map<String, dynamic>? _selected, _detail;
+  Map<String, dynamic>? _selected, _detail, _revenue;
   bool _busy = true, _detailBusy = false, _recordBusy = false;
   DateTime? _loadedAt;
   static const _nav = [
@@ -72,6 +74,16 @@ class _AdminConsoleState extends State<AdminConsole> {
   void initState() {
     super.initState();
     _loadHotels();
+    _loadRevenue();
+  }
+
+  Future<void> _loadRevenue() async {
+    try {
+      final r = await _api.call('adminLicenseRevenue');
+      if (mounted) setState(() => _revenue = r);
+    } catch (e) {
+      _fail(e);
+    }
   }
 
   @override
@@ -176,7 +188,7 @@ class _AdminConsoleState extends State<AdminConsole> {
       await _loadAudit();
       return;
     }
-    await _loadHotels();
+    await Future.wait([_loadHotels(), _loadRevenue()]);
   }
 
   Future<void> _openHotel(Map<String, dynamic> hotel) async {
@@ -285,6 +297,38 @@ class _AdminConsoleState extends State<AdminConsole> {
     }
   }
 
+  Future<void> _deleteHotel() async {
+    final hotel = _detail ?? _selected;
+    if (hotel == null || _detailBusy) return;
+    final id = hotel['hotelId'];
+    final confirmed = await _confirm(
+      'Delete ${hotel['hotelName']}?',
+      'This permanently removes this hotel’s rooms, bookings, guest records, photos and settings. The owner’s login account stays in Firebase. This cannot be undone.',
+      'Delete permanently',
+    );
+    if (!confirmed || !mounted) return;
+    setState(() => _detailBusy = true);
+    try {
+      await _api.call('adminDeleteHotel', {
+        'hotelId': id,
+        'confirmHotelId': id,
+      });
+      if (!mounted) return;
+      setState(() {
+        _selected = null;
+        _detail = null;
+        _hotels.removeWhere((hotel) => hotel['hotelId'] == id);
+        _section = 1;
+      });
+      showAppToast(context, 'Hotel deleted.', error: false);
+      await _loadHotels();
+    } catch (e) {
+      _fail(e);
+    } finally {
+      if (mounted) setState(() => _detailBusy = false);
+    }
+  }
+
   Future<void> _issueKey({String? hotelId}) async {
     final result = await showAdminDialog<Map<String, dynamic>>(
       context: context,
@@ -293,20 +337,15 @@ class _AdminConsoleState extends State<AdminConsole> {
           AdminKeyDialog(api: _api, hotels: _hotels, hotelId: hotelId),
     );
     if (result == null || !mounted) return;
-    await _showGeneratedKey(
-      result,
-      result['displayDuration'] as int,
-      result['displayUnit'] as String,
-    );
+    unawaited(_loadRevenue());
+    await _showGeneratedKey(result);
     if (_section == 2) await _loadKeys();
   }
 
-  Future<void> _showGeneratedKey(
-    Map<String, dynamic> result,
-    int duration,
-    String unit,
-  ) async {
+  Future<void> _showGeneratedKey(Map<String, dynamic> result) async {
     final key = '${result['key']}';
+    final plan =
+        '${result['planLabel']} plan · ${adminMoney(result['amount'])} paid';
     await showAdminDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -317,7 +356,7 @@ class _AdminConsoleState extends State<AdminConsole> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '$duration $unit',
+              plan,
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
@@ -354,9 +393,7 @@ class _AdminConsoleState extends State<AdminConsole> {
             onPressed: () => FileSaver.instance.saveFile(
               name: 'hotel-pro-license',
               bytes: Uint8List.fromList(
-                utf8.encode(
-                  'Hotel Pro license\nDuration: $duration $unit\n$key\n',
-                ),
+                utf8.encode('Hotel Pro license\nPlan: $plan\n$key\n'),
               ),
               fileExtension: 'txt',
               mimeType: MimeType.text,
@@ -412,7 +449,7 @@ class _AdminConsoleState extends State<AdminConsole> {
               subtitle: Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
-                  '${h['phoneNumber'] ?? ''}  ·  ${adminMap(h['rooms'])['total'] ?? 0} rooms\n${h['email'] ?? ''}',
+                  '${h['phoneNumber'] ?? ''}  ·  ${adminMap(h['rooms'])['total'] ?? 0} rooms\n${adminPlanLine(adminMap(h['license'])).isEmpty ? h['email'] ?? '' : adminPlanLine(adminMap(h['license']))}',
                   style: const TextStyle(
                     fontSize: 12,
                     color: CustomColors.muted,
@@ -447,6 +484,122 @@ class _AdminConsoleState extends State<AdminConsole> {
         ),
     ],
   );
+  Widget _revenueCard(Map<String, dynamic> revenue) {
+    final plans = adminItems({'items': revenue['plans']});
+    final months = adminItems({'items': revenue['months']});
+    final top = months.fold<num>(1, (m, e) => max(m, adminNumber(e['amount'])));
+    const names = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    String monthName(String key) {
+      final m = int.tryParse(key.split('-').last) ?? 1;
+      return names[(m - 1).clamp(0, 11)];
+    }
+
+    return AdminCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AdminSectionTitle(
+            'Membership revenue',
+            subtitle:
+                'From paid license keys · ${adminMoney(revenue['total'])} in total',
+          ),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final p in plans)
+                Container(
+                  width: 168,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: CustomColors.background,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: CustomColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${p['label']} · ${adminMoney(p['price'])}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: CustomColors.muted,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        adminMoney(p['amount']),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        '${p['count']} sold',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          const Text(
+            'Last 6 months',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 10),
+          for (final m in months)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 44,
+                    child: Text(
+                      monthName('${m['month']}'),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  Expanded(
+                    child: LinearProgressIndicator(
+                      value: (adminNumber(m['amount']) / top).toDouble(),
+                      minHeight: 9,
+                      color: CustomColors.available,
+                      backgroundColor: CustomColors.neutralTint,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  SizedBox(
+                    width: 84,
+                    child: Text(
+                      adminMoney(m['amount']),
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _overview() {
     num sum(String field) => _hotels.fold<num>(
       0,
@@ -484,6 +637,14 @@ class _AdminConsoleState extends State<AdminConsole> {
                   '${_hotels.where((h) => h['status'] == 'Trial').length} hotels on trial',
             ),
             AdminMetric(
+              title: 'Total revenue',
+              value: _revenue == null ? '—' : adminMoney(_revenue!['total']),
+              icon: Icons.currency_rupee_rounded,
+              note: _revenue == null
+                  ? 'Loading payments…'
+                  : '${adminMoney(_revenue!['thisMonth'])} this month · ${_revenue!['count']} paid keys',
+            ),
+            AdminMetric(
               title: 'Rooms',
               value: '$total',
               icon: Icons.bed_outlined,
@@ -500,6 +661,10 @@ class _AdminConsoleState extends State<AdminConsole> {
           ],
         ),
         const SizedBox(height: 24),
+        if (_revenue != null) ...[
+          _revenueCard(_revenue!),
+          const SizedBox(height: 24),
+        ],
         AdminCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -674,7 +839,7 @@ class _AdminConsoleState extends State<AdminConsole> {
                     ),
                     const SizedBox(height: 7),
                     Text(
-                      '${key['durationMonths']} months · Issued ${adminDate(key['createdAt'])}',
+                      '${key['planLabel'] ?? '${key['durationMonths']} months'}${key['paymentReceived'] == true ? ' · ${adminMoney(key['amount'])} paid' : ''} · Issued ${adminDate(key['createdAt'])}',
                       style: const TextStyle(
                         color: CustomColors.muted,
                         fontSize: 12,
@@ -823,7 +988,9 @@ class _AdminConsoleState extends State<AdminConsole> {
               label: const Text('Generate hotel key'),
             ),
             CustomButton.outlineIcon(
-              onPressed: _detailBusy ? null : _setEnabled,
+              onPressed: _detailBusy || d['deleting'] == true
+                  ? null
+                  : _setEnabled,
               icon: Icon(
                 d['enabled'] == false
                     ? Icons.play_arrow_rounded
@@ -832,6 +999,14 @@ class _AdminConsoleState extends State<AdminConsole> {
               label: Text(
                 d['enabled'] == false ? 'Resume hotel' : 'Suspend hotel',
               ),
+            ),
+            CustomButton.outlineIcon(
+              onPressed: _detailBusy ? null : _deleteHotel,
+              icon: const Icon(
+                Icons.delete_outline_rounded,
+                color: CustomColors.error,
+              ),
+              label: Text(_detailBusy ? 'Please wait…' : 'Delete hotel'),
             ),
           ],
         ),
@@ -859,6 +1034,12 @@ class _AdminConsoleState extends State<AdminConsole> {
                   _info(
                     'Membership expires',
                     adminDate(adminMap(d['license'])['expiresAt']),
+                  ),
+                  _info(
+                    'Plan',
+                    adminPlanLine(adminMap(d['license'])).isEmpty
+                        ? 'No paid plan yet'
+                        : adminPlanLine(adminMap(d['license'])),
                   ),
                   _info('Guests', '${d['guests']}'),
                   _info('Hotel ID', '${d['hotelId']}'),

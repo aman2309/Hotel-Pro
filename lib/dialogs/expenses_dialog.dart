@@ -8,10 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
 import '../stores/expense_store.dart';
 import '../stores/hotel_settings_store.dart';
+import '../services/document_output.dart';
 
 Future<void> showExpensesDialog(BuildContext context) async {
   await ExpenseStore.loadExpenses();
@@ -196,10 +196,9 @@ Future<void> showExpensesDialog(BuildContext context) async {
               ),
             );
 
-            await Printing.layoutPdf(
+            await DocumentOutput.printPdf(
+              await pdf.save(),
               name: "Silver_Cloud_Expense_Report.pdf",
-              dynamicLayout: false,
-              onLayout: (PdfPageFormat format) async => pdf.save(),
             );
           }
 

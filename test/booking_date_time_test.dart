@@ -67,15 +67,17 @@ void main() {
       await tester.ensureVisible(customTimes);
       await tester.tap(customTimes);
       await tester.pumpAndSettle();
+      // Same-day stays start when the booking is confirmed, so there is no
+      // check-in time to pick; only the planned check-out time is editable.
       expect(
-        tester
-            .widget<DateTimeField>(
-              find.byWidgetPredicate(
-                (w) => w is DateTimeField && w.label == 'Check-in time',
-              ),
-            )
-            .value,
-        '12:00 PM',
+        find.byWidgetPredicate(
+          (w) => w is DateTimeField && w.label == 'Check-in time',
+        ),
+        findsNothing,
+      );
+      expect(
+        find.textContaining('Check-in starts when you confirm'),
+        findsOneWidget,
       );
       expect(
         tester
@@ -87,18 +89,6 @@ void main() {
             .value,
         '11:00 AM',
       );
-      await openField('Check-in time');
-      tester
-          .widget<CupertinoDatePicker>(find.byType(CupertinoDatePicker))
-          .onDateTimeChanged(DateTime(2000, 1, 1, 21, 37));
-      await tester.tap(find.text('Use time'));
-      await tester.pumpAndSettle();
-      final checkin = tester.widget<DateTimeField>(
-        find.byWidgetPredicate(
-          (w) => w is DateTimeField && w.label == 'Check-in time',
-        ),
-      );
-      expect(checkin.value, '9:37 PM');
       await openField('Check-out time');
       tester
           .widget<CupertinoDatePicker>(find.byType(CupertinoDatePicker))
@@ -144,16 +134,6 @@ void main() {
       );
       await tester.tap(customTimes);
       await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<DateTimeField>(
-              find.byWidgetPredicate(
-                (w) => w is DateTimeField && w.label == 'Check-in time',
-              ),
-            )
-            .value,
-        '12:00 PM',
-      );
       expect(
         tester
             .widget<DateTimeField>(

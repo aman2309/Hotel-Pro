@@ -99,7 +99,12 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('ROOM 101'), findsOneWidget);
       expect(find.text('Create floor'), findsNothing);
-      await tester.tap(find.text('More'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Settings'),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text('Guests'),
@@ -263,7 +268,7 @@ void main() {
       ).writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
     });
-    for (final section in ['Edit rooms', 'More', 'Settings']) {
+    for (final section in ['Edit rooms', 'Reports', 'Settings']) {
       await tester.tap(
         find.descendant(
           of: find.byType(NavigationBar),
@@ -280,8 +285,8 @@ void main() {
         await File(
           'docs/validation/modern-ui/${section == 'Settings'
               ? 'settings'
-              : section == 'More'
-              ? 'more'
+              : section == 'Reports'
+              ? 'reports'
               : 'edit-rooms'}.png',
         ).writeAsBytes(bytes!.buffer.asUint8List());
         image.dispose();

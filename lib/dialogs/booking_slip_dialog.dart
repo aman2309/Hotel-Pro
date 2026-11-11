@@ -10,13 +10,13 @@ import '../widgets/app_toast.dart';
 import '../services/hotel_photo_storage_service.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
 import '../models/customer.dart';
 import '../models/room.dart';
 import '../services/hotel_photo_bytes.dart';
 import '../stores/customer_store.dart';
 import '../stores/hotel_settings_store.dart';
+import '../services/document_output.dart';
 
 Future<void> showBookingSlipDialog(BuildContext context, Room room) {
   return showCustomBottomSheet<void>(
@@ -68,11 +68,7 @@ Future<void> printBookingSlip(Room room, {bool? showFutureBooking}) async {
     room,
     showFutureBooking: showFutureBooking,
   );
-  await Printing.layoutPdf(
-    name: 'Booking-Room-${room.roomNumber}',
-    dynamicLayout: false,
-    onLayout: (_) async => bytes,
-  );
+  await DocumentOutput.printPdf(bytes, name: 'Booking-Room-${room.roomNumber}');
 }
 
 Future<void> shareBookingSlip(Room room, {bool? showFutureBooking}) async {
@@ -80,8 +76,8 @@ Future<void> shareBookingSlip(Room room, {bool? showFutureBooking}) async {
     room,
     showFutureBooking: showFutureBooking,
   );
-  await Printing.sharePdf(
-    bytes: bytes,
+  await DocumentOutput.sharePdf(
+    bytes,
     filename: 'Booking-Room-${room.roomNumber}.pdf',
   );
 }

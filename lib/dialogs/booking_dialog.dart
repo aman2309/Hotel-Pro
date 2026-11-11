@@ -1,11 +1,8 @@
 import '../widgets/date_time_field.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/custom_bottom_sheet.dart';
-import '../widgets/custom_dropdown.dart';
 import '../theme/custom_colors.dart';
-import '../widgets/custom_button.dart';
-import '../widgets/custom_dialog.dart';
-import '../widgets/custom_text_field.dart';
+import '../widgets/hotel_ui.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -552,8 +549,12 @@ Future<bool?> showBookingDialog(
               room.idNumber = idNumber;
               room.guestAddress = guestAddress;
               room.bookingRate = bookingRate;
-              room.bookingDate = dateOnly(selectedBookingDate);
-              room.bookingTime = selectedFromDateTime();
+              // Every new stay gets its own start: the moment this booking is
+              // confirmed. Never reuse a time left on the room from an
+              // earlier stay or the default 12:00 PM check-in slot.
+              final DateTime confirmedAt = DateTime.now();
+              room.bookingDate = dateOnly(confirmedAt);
+              room.bookingTime = confirmedAt;
               room.bookingEndTime = selectedToDateTime(days);
               room.checkoutTime = null;
               room.days = days;
@@ -679,15 +680,15 @@ Future<bool?> showBookingDialog(
                         ? Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.add_a_photo_rounded, size: 30),
+                              const Icon(Icons.add_a_photo_outlined, size: 26),
                               const SizedBox(height: 5),
                               Text(title, textAlign: TextAlign.center),
                               const SizedBox(height: 3),
                               const Text(
-                                "Camera / gallery",
+                                "Camera or gallery",
                                 style: TextStyle(
                                   fontSize: 10,
-                                  fontWeight: FontWeight.bold,
+                                  color: CustomColors.muted,
                                 ),
                               ),
                             ],
@@ -704,7 +705,9 @@ Future<bool?> showBookingDialog(
                                 child: Container(
                                   width: double.infinity,
                                   padding: const EdgeInsets.all(4),
-                                  color: CustomColors.muted,
+                                  color: CustomColors.text.withValues(
+                                    alpha: .6,
+                                  ),
                                   child: Text(
                                     title,
                                     textAlign: TextAlign.center,
@@ -737,7 +740,13 @@ Future<bool?> showBookingDialog(
                         color: CustomColors.error,
                       ),
                     ),
-              title: Text("Book Room ${room.roomNumber}"),
+              icon: const CustomIconBadge(Icons.add_home_outlined),
+              title: CustomSheetTitle(
+                "Book room ${room.roomNumber}",
+                subtitle: isToday(selectedBookingDate)
+                    ? 'Check-in today · ${room.roomType}'
+                    : 'Future booking · ${formatDate(selectedBookingDate)}',
+              ),
               content: AbsorbPointer(
                 absorbing: saving,
                 child: SizedBox(
@@ -746,27 +755,9 @@ Future<bool?> showBookingDialog(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 16),
-                          child: Text(
-                            isToday(selectedBookingDate)
-                                ? 'Check-in today'
-                                : 'Future booking · ${formatDate(selectedBookingDate)}',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        const Align(
-                          alignment: Alignment.centerLeft,
-                          child: Padding(
-                            padding: EdgeInsets.only(bottom: 16),
-                            child: Text(
-                              'Guest details',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
+                        const CustomSectionTitle(
+                          'Guest details',
+                          padding: EdgeInsets.fromLTRB(2, 0, 2, 12),
                         ),
                         CustomTextField(
                           controller: mobileController,
@@ -792,14 +783,14 @@ Future<bool?> showBookingDialog(
                         Row(
                           children: [
                             photoButton(
-                              title: "ID FRONT PHOTO",
+                              title: "ID front photo",
                               photoData: idFrontPhoto,
                               focusNode: frontPhotoFocus,
                               onPressed: pickFrontPhoto,
                             ),
                             const SizedBox(width: 10),
                             photoButton(
-                              title: "ID BACK PHOTO",
+                              title: "ID back photo",
                               photoData: idBackPhoto,
                               focusNode: backPhotoFocus,
                               onPressed: pickBackPhoto,
@@ -983,24 +974,26 @@ Future<bool?> showBookingDialog(
                             }
                           }
 
-                          return Card(
-                            margin: const EdgeInsets.only(top: 10),
-                            child: Padding(
-                              padding: const EdgeInsets.all(10),
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: CustomSurface(
+                              padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
                               child: Column(
                                 children: [
                                   Row(
                                     children: [
                                       Expanded(
                                         child: Text(
-                                          "GUEST ${index + 2}",
+                                          "Guest ${index + 2}",
                                           style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w600,
                                           ),
                                         ),
                                       ),
                                       IconButton(
-                                        tooltip: "REMOVE GUEST",
+                                        tooltip: "Remove guest",
+                                        color: CustomColors.error,
                                         onPressed: () {
                                           updateBookingForm(() {
                                             extraGuestControllers.removeAt(
@@ -1038,7 +1031,7 @@ Future<bool?> showBookingDialog(
                                   Row(
                                     children: [
                                       photoButton(
-                                        title: "ID FRONT PHOTO",
+                                        title: "ID front photo",
                                         photoData:
                                             guest["frontPhoto"] as String,
                                         focusNode:
@@ -1047,7 +1040,7 @@ Future<bool?> showBookingDialog(
                                       ),
                                       const SizedBox(width: 10),
                                       photoButton(
-                                        title: "ID BACK PHOTO",
+                                        title: "ID back photo",
                                         photoData: guest["backPhoto"] as String,
                                         focusNode:
                                             guest["backFocus"] as FocusNode,
@@ -1147,7 +1140,7 @@ Future<bool?> showBookingDialog(
                           ),
                         ),
 
-                        const SizedBox(height: 15),
+                        const CustomSectionTitle('Rent & payment'),
 
                         CustomTextField(
                           controller: rentController,
@@ -1232,18 +1225,9 @@ Future<bool?> showBookingDialog(
                         ),
                         const SizedBox(height: 24),
 
-                        const Align(
-                          alignment: Alignment.centerLeft,
-                          child: Padding(
-                            padding: EdgeInsets.only(bottom: 14),
-                            child: Text(
-                              'Stay dates & times',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
+                        const CustomSectionTitle(
+                          'Stay dates & times',
+                          padding: EdgeInsets.fromLTRB(2, 0, 2, 12),
                         ),
                         Align(
                           alignment: Alignment.centerLeft,
@@ -1287,8 +1271,10 @@ Future<bool?> showBookingDialog(
                         SwitchListTile.adaptive(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Set custom times'),
-                          subtitle: const Text(
-                            'Default: check-in 12:00 PM · check-out 11:00 AM',
+                          subtitle: Text(
+                            isToday(selectedBookingDate)
+                                ? 'Check-in starts when you confirm · default check-out 11:00 AM'
+                                : 'Default: check-in 12:00 PM · check-out 11:00 AM',
                           ),
                           value: customTimes,
                           onChanged: (value) => updateBookingForm(() {
@@ -1300,12 +1286,13 @@ Future<bool?> showBookingDialog(
                           }),
                         ),
                         if (customTimes) ...[
-                          DateTimeField(
-                            label: 'Check-in time',
-                            value: formatTimeOfDay(fromTime),
-                            icon: Icons.login_rounded,
-                            onTap: () => pickTime(true),
-                          ),
+                          if (!isToday(selectedBookingDate))
+                            DateTimeField(
+                              label: 'Check-in time',
+                              value: formatTimeOfDay(fromTime),
+                              icon: Icons.login_rounded,
+                              onTap: () => pickTime(true),
+                            ),
                           DateTimeField(
                             label: 'Check-out time',
                             value: formatTimeOfDay(toTime),

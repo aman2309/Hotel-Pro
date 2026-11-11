@@ -10,12 +10,14 @@ class HotelMembershipCard extends StatelessWidget {
     required this.daysLeft,
     this.endsAt,
     this.onTap,
+    this.planLabel = '',
   });
 
   final HotelLicenseView view;
   final int daysLeft;
   final DateTime? endsAt;
   final VoidCallback? onTap;
+  final String planLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +25,8 @@ class HotelMembershipCard extends StatelessWidget {
     final trial = view == HotelLicenseView.trial;
     final usable = active || trial;
     final status = switch (view) {
-      HotelLicenseView.activated => 'Active membership',
+      HotelLicenseView.activated =>
+        planLabel.isEmpty ? 'Active membership' : '$planLabel plan · Active',
       HotelLicenseView.trial => 'Free trial',
       HotelLicenseView.expired => 'Membership expired',
       HotelLicenseView.missing => 'Activation required',

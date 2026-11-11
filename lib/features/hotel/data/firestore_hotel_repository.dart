@@ -109,6 +109,7 @@ class FirestoreHotelRepository implements HotelRepository {
       bookings: cache.docs('bookings'),
       futureBookings: cache.docs('futureBookings'),
       closedRooms: cache.docs('closedRooms'),
+      roomDocs: roomDocs,
     );
     final HotelSettingsData settings = HotelSettingsData.fromMap(
       Map<String, dynamic>.from(

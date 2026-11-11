@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import '../stores/hotel_settings_store.dart';
+
 import '../services/hotel_cloud_sync_service.dart';
+import '../stores/hotel_settings_store.dart';
 import '../theme/custom_colors.dart';
-import 'custom_text_field.dart';
 import 'custom_button.dart';
+import 'custom_text_field.dart';
 
 /// Shared hotel profile editor, embedded in Settings or the legacy sheet entry.
 class HotelSettingsForm extends StatefulWidget {
@@ -186,19 +187,19 @@ class _HotelSettingsFormState extends State<HotelSettingsForm> {
                     : null;
               },
             ),
-            CustomTextField(
-              controller: _password,
-              label: 'Admin Password',
-              icon: Icons.lock_rounded,
-              enabled: !_busy,
-              obscureText: _hide,
-              onToggleVisibility: () => setState(() => _hide = !_hide),
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _save(),
-              validator: (value) =>
-                  (value?.length ?? 0) < 4 ? 'Use at least 4 characters' : null,
-              onChanged: (_) => _dirty = true,
-            ),
+            // CustomTextField(
+            //   controller: _password,
+            //   label: 'Admin Password',
+            //   icon: Icons.lock_rounded,
+            //   enabled: !_busy,
+            //   obscureText: _hide,
+            //   onToggleVisibility: () => setState(() => _hide = !_hide),
+            //   textInputAction: TextInputAction.done,
+            //   onSubmitted: (_) => _save(),
+            //   validator: (value) =>
+            //       (value?.length ?? 0) < 4 ? 'Use at least 4 characters' : null,
+            //   onChanged: (_) => _dirty = true,
+            // ),
             const Text(
               'Admin password is used for protected hotel actions.',
               style: TextStyle(fontSize: 12, color: CustomColors.muted),

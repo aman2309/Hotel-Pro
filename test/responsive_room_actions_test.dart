@@ -82,14 +82,25 @@ void main() {
         await tester.tap(button);
         await tester.pumpAndSettle();
         expect(closed, isTrue);
-        await tester.tap(find.text('More'));
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NavigationBar),
+            matching: find.text('Reports'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Payments received'), findsOneWidget);
+        expect(find.text('Hotel tools'), findsNothing);
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NavigationBar),
+            matching: find.text('Settings'),
+          ),
+        );
         await tester.pumpAndSettle();
         expect(find.text('Hotel tools'), findsOneWidget);
+        expect(find.text('Edit hotel information'), findsOneWidget);
         expect(find.byType(HotelSettingsForm), findsNothing);
-        await tester.tap(find.text('Settings'));
-        await tester.pumpAndSettle();
-        expect(find.byType(HotelSettingsForm), findsOneWidget);
-        expect(find.text('Hotel tools'), findsNothing);
         await tester.tap(find.text('Edit rooms'));
         await tester.pumpAndSettle();
         final edit = find.byKey(const ValueKey('edit-room-101'));

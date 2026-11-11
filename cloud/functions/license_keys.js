@@ -13,6 +13,18 @@ function hashKey(raw, secret) {
   if (!secret) throw Error('MISSING_SECRET');
   return createHmac('sha256', secret).update('license-key-v2:' + normalizeKey(raw)).digest('hex');
 }
+// Membership plans sold by the admin. Prices are fixed server-side so the
+// amount recorded for revenue cannot be changed by the client.
+const PLANS = Object.freeze({
+  '1m': {months: 1, amount: 1000, label: '1 month'},
+  '3m': {months: 3, amount: 2500, label: '3 months'},
+  '6m': {months: 6, amount: 5000, label: '6 months'},
+  '12m': {months: 12, amount: 10000, label: '12 months'},
+});
+function planFor(id) {
+  if (typeof id !== 'string' || !Object.hasOwn(PLANS, id)) throw Error('INVALID_PLAN');
+  return PLANS[id];
+}
 function durationMonths(value, unit) {
   if (!Number.isInteger(value) || value < 1 || !['months', 'years'].includes(unit)) throw Error('INVALID_DURATION');
   const months = value * (unit === 'years' ? 12 : 1);
@@ -21,7 +33,9 @@ function durationMonths(value, unit) {
 }
 async function issueKey(db, actor, input, secret) {
   requireAdmin(actor);
-  const months = durationMonths(input.duration, input.unit);
+  const plan = planFor(input.planId);
+  if (input.paymentReceived !== true) throw Error('PAYMENT_REQUIRED');
+  const months = plan.months;
   const hotelId = input.hotelId || null;
   if (hotelId !== null && (typeof hotelId !== 'string' || hotelId.includes('/') || hotelId.length > 150)) throw Error('INVALID_HOTEL');
   if (typeof input.requestId !== 'string' || !/^[a-zA-Z0-9_-]{20,100}$/.test(input.requestId)) throw Error('INVALID_REQUEST');
@@ -36,17 +50,21 @@ async function issueKey(db, actor, input, secret) {
     if (hotelId && !hotel.exists) throw Error('HOTEL_NOT_FOUND');
     if (prior.exists) {
       const p = prior.data();
-      if (p.issuedBy !== actor.uid || p.durationMonths !== months || p.reservedBusinessId !== hotelId) throw Error('REQUEST_REUSED');
+      if (p.issuedBy !== actor.uid || p.planId !== input.planId || p.reservedBusinessId !== hotelId) throw Error('REQUEST_REUSED');
       return;
     }
-    tx.create(ref, {version: 2, status: 'issued', disabled: false, plan: 'custom',
-      durationMonths: months, duration: input.duration, durationUnit: input.unit,
+    tx.create(ref, {version: 2, status: 'issued', disabled: false, plan: input.planId,
+      planId: input.planId, planLabel: plan.label, amount: plan.amount, currency: 'INR',
+      paymentReceived: true, paymentConfirmedBy: actor.uid, paymentConfirmedAt: FieldValue.serverTimestamp(),
+      durationMonths: months, duration: months, durationUnit: 'months',
       reservedBusinessId: hotelId, issuedBy: actor.uid, keyHint: hex.slice(-4),
       createdAt: FieldValue.serverTimestamp()});
     tx.create(audit, {actorUid: actor.uid, action: 'license-key-issued', hotelId,
-      keyId: id, durationMonths: months, createdAt: FieldValue.serverTimestamp()});
+      keyId: id, durationMonths: months, planId: input.planId, amount: plan.amount,
+      createdAt: FieldValue.serverTimestamp()});
   });
-  return {key, keyId: id, durationMonths: months, hotelId};
+  return {key, keyId: id, durationMonths: months, hotelId, planId: input.planId,
+    planLabel: plan.label, amount: plan.amount};
 }
 async function redeemKey(db, uid, identity, raw, secret, now = Date.now()) {
   const id = hashKey(raw, secret);
@@ -80,7 +98,8 @@ async function redeemKey(db, uid, identity, raw, secret, now = Date.now()) {
     const expiry = addCalendarMonths(new Date(base), months);
     tx.set(keyRef, {status: 'redeemed', businessId: bid, ownerUid: uid, redeemedAt: Timestamp.fromMillis(now),
       resultExpiresAt: Timestamp.fromDate(expiry)}, {merge: true});
-    tx.set(licenseRef, {activated: true, issuer: 'hotelpro-license-server-v2', plan: 'custom', durationMonths: months,
+    tx.set(licenseRef, {activated: true, issuer: 'hotelpro-license-server-v2', plan: issued.planId || 'custom',
+      planLabel: issued.planLabel || `${months} months`, durationMonths: months,
       expiresAt: Timestamp.fromDate(expiry), lastRedemptionId: id, activationId: id,
       activatedAt: license.activatedAt || Timestamp.fromMillis(now), renewedAt: Timestamp.fromMillis(now)}, {merge: true});
     tx.set(attemptRef, {windowStart: now, count: 0, lockedUntil: 0});
@@ -104,7 +123,9 @@ async function listKeys(db, actor, input = {}) {
   return {items: snap.docs.map(d => {const p=d.data();return {keyId:d.id, hint:p.keyHint || 'Legacy PIN',
     status:p.disabled ? 'revoked' : p.status, durationMonths:p.durationMonths || (p.plan === 'annual' ? 12 : 0),
     hotelId:p.businessId || p.reservedBusinessId || null, createdAt:p.createdAt?.toMillis() || null,
-    redeemedAt:p.redeemedAt?.toMillis() || null, expiresAt:p.resultExpiresAt?.toMillis() || null};}),
+    redeemedAt:p.redeemedAt?.toMillis() || null, expiresAt:p.resultExpiresAt?.toMillis() || null,
+    planId:p.planId || null, planLabel:p.planLabel || null, amount:p.amount || 0,
+    paymentReceived:p.paymentReceived === true};}),
     nextCursor:snap.size === limit ? snap.docs.at(-1).id : null};
 }
 async function revokeKey(db, actor, keyId) {
@@ -120,4 +141,35 @@ async function revokeKey(db, actor, keyId) {
   });
   return {revoked:true};
 }
-module.exports={normalizeKey,hashKey,durationMonths,issueKey,redeemKey,listKeys,revokeKey};
+// India-time month key, e.g. "2026-11".
+function istMonth(ms) {
+  return new Date(ms + 19800000).toISOString().slice(0, 7);
+}
+// Membership revenue from paid keys. Revoked keys are excluded.
+async function revenue(db, actor, input = {}, now = Date.now()) {
+  requireAdmin(actor);
+  const snap = await db.collection('licenseKeys').where('paymentReceived', '==', true).get();
+  const plans = Object.entries(PLANS).map(([planId, p]) =>
+    ({planId, label: p.label, price: p.amount, count: 0, amount: 0}));
+  const months = new Map();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now + 19800000);
+    d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth() - i);
+    months.set(d.toISOString().slice(0, 7), 0);
+  }
+  const current = istMonth(now);
+  let total = 0, thisMonth = 0, count = 0;
+  for (const doc of snap.docs) {
+    const k = doc.data();
+    if (k.disabled || k.status === 'revoked') continue;
+    const amount = Number(k.amount) || 0, at = k.paymentConfirmedAt?.toMillis?.() ?? k.createdAt?.toMillis?.() ?? now;
+    total += amount;count++;
+    const month = istMonth(at);
+    if (month === current) thisMonth += amount;
+    if (months.has(month)) months.set(month, months.get(month) + amount);
+    const plan = plans.find(p => p.planId === k.planId);
+    if (plan) {plan.count++;plan.amount += amount;}
+  }
+  return {total, thisMonth, count, plans, months: [...months].map(([month, amount]) => ({month, amount}))};
+}
+module.exports={PLANS,planFor,normalizeKey,hashKey,durationMonths,issueKey,redeemKey,listKeys,revokeKey,revenue};

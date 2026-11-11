@@ -22,10 +22,10 @@ function status(license, enabled, now = Date.now()) {
 }
 async function hotelSummary(ref) {
   const business=(await ref.get()).data();
-  if(!business) throw Error('HOTEL_NOT_FOUND');
+  if (!business || business.deletedAt) throw Error('HOTEL_NOT_FOUND');
   const [license,settings,rooms,user] = await Promise.all([
     ref.collection('settings').doc('license').get(), ref.collection('settings').doc('hotel').get(),
-    ref.collection('rooms').get(),ref.firestore.doc(`users/${business.ownerUid}`).get()]);
+    ref.collection('rooms').get(),business.ownerUid ? ref.firestore.doc(`users/${business.ownerUid}`).get() : null]);
   const l=license.data() || {}, s=settings.data() || {};
   const activeRooms=rooms.docs.map(d=>d.data()).filter(d=>!d.deleted);
   const counts={total:activeRooms.length,available:0,booked:0,cleaning:0,closed:0,future:0};
@@ -35,21 +35,28 @@ async function hotelSummary(ref) {
     if(room.futureBooking) counts.future++;
   }
   return {hotelId:ref.id,hotelName:s.hotel_name || business.businessName || 'Hotel',
-    ownerUid:business.ownerUid,email:user.data()?.email || '',ownerName:user.data()?.ownerName || '',
+    ownerUid:business.ownerUid,email:user?.data()?.email || '',ownerName:user?.data()?.ownerName || '',
     phoneNumber:s.hotel_mobile || business.phoneNumber || '',address:s.hotel_address || '',
-    enabled:business.enabled !== false,status:status(l,business.enabled !== false),
-    createdAt:clean(business.createdAt),settings:clean(s),license:clean(l),rooms:counts};
+    enabled:business.enabled !== false,status:business.deletingAt ? 'Deleting' : status(l,business.enabled !== false),
+    deleting: Boolean(business.deletingAt),createdAt:clean(business.createdAt),settings:clean(s),license:clean(l),rooms:counts};
 }
 async function listHotels(db, actor, input = {}) {
   requireAdmin(actor);
   const limit=input.limit ?? 30;
   if(!Number.isInteger(limit)||limit<1||limit>100) throw Error('INVALID_LIMIT');
-  let q=db.collection('businesses').orderBy(FieldPath.documentId()).limit(limit);
-  if(input.after) q=q.startAfter(validId(input.after));
-  const snap=await q.get(),items=[];
-  // Small groups bound fan-out while keeping pagination complete.
-  for(let i=0;i<snap.docs.length;i+=10) items.push(...await Promise.all(snap.docs.slice(i,i+10).map(d=>hotelSummary(d.ref))));
-  return {items,nextCursor:snap.size===limit?snap.docs.at(-1).id:null};
+  // Read only ordering metadata first, including legacy hotels without createdAt.
+  const snapshot = await db.collection('businesses').select('createdAt', 'deletedAt').get();
+  const ordered = snapshot.docs.filter(doc => !doc.get('deletedAt')).sort((a, b) =>
+    (dateMs(b.get('createdAt')) ?? 0) - (dateMs(a.get('createdAt')) ?? 0) ||
+    a.id.localeCompare(b.id));
+  const cursorIndex = input.after ? ordered.findIndex(doc => doc.id === validId(input.after)) : -1;
+  if (input.after && cursorIndex === -1) throw Error('Hotel list changed. Refresh and try again.');
+  const page = ordered.slice(cursorIndex + 1, cursorIndex + 1 + limit);
+  const items = [];
+  for (let i = 0; i < page.length; i += 10) {
+    items.push(...await Promise.all(page.slice(i, i + 10).map(doc => hotelSummary(doc.ref))));
+  }
+  return {items, nextCursor: cursorIndex + 1 + limit < ordered.length ? page.at(-1).id : null};
 }
 function dateMs(raw) {
   if(raw?.toMillis) return raw.toMillis();

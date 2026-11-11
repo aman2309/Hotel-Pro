@@ -3,8 +3,9 @@ import '../models/room.dart';
 import '../theme/custom_colors.dart';
 import '../widgets/hotel_ui.dart';
 import '../widgets/hotel_room_card.dart';
+import '../widgets/future_booking_badge.dart';
 import '../widgets/custom_bottom_sheet.dart';
-import '../widgets/hotel_settings_form.dart';
+import '../dialogs/reports_dialog.dart';
 import '../widgets/hotel_cloud_status_chip.dart';
 
 class HotelDashboardView extends StatefulWidget {
@@ -52,6 +53,7 @@ class _HotelDashboardViewState extends State<HotelDashboardView> {
     ('expenses', 'Expenses', Icons.account_balance_wallet_outlined),
     ('settings', 'Hotel settings', Icons.tune_rounded),
     ('delete', 'Delete room', Icons.delete_outline_rounded),
+    ('contact', 'Contact us', Icons.support_agent_rounded),
     ('logout', 'Sign out', Icons.logout_rounded),
   ];
   Future<void> _options() async {
@@ -89,6 +91,8 @@ class _HotelDashboardViewState extends State<HotelDashboardView> {
   void _dispatch(String action) {
     if (action == 'settings') {
       _selectSection(3);
+    } else if (action == 'reports') {
+      _selectSection(2);
     } else if (action == 'edit' || action == 'delete') {
       _selectSection(1);
     } else {
@@ -414,7 +418,11 @@ class _HotelDashboardViewState extends State<HotelDashboardView> {
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
                 mainAxisExtent:
-                    128 + (MediaQuery.textScalerOf(context).scale(20) - 20) * 3,
+                    128 +
+                    (visible.any((r) => futureBookingLabel(r) != null)
+                        ? 20
+                        : 0) +
+                    (MediaQuery.textScalerOf(context).scale(20) - 20) * 3,
               ),
               delegate: SliverChildBuilderDelegate((context, i) {
                 final room = visible[i];
@@ -422,10 +430,6 @@ class _HotelDashboardViewState extends State<HotelDashboardView> {
                   room: room,
                   onTap: () => widget.onOpenRoom(room),
                   timeLabel: room.bookingTime?.toString() ?? '',
-                  futureLabel:
-                      room.futureBooking && room.futureBookingDate != null
-                      ? room.futureBookingDate.toString()
-                      : null,
                 );
               }, childCount: visible.length),
             ),
@@ -434,45 +438,70 @@ class _HotelDashboardViewState extends State<HotelDashboardView> {
     ];
   }
 
-  List<Widget> _settings() => [
+  List<Widget> _reports() => [
     const SliverPadding(
-      padding: EdgeInsets.all(18),
+      padding: EdgeInsets.fromLTRB(18, 18, 18, 14),
       sliver: SliverToBoxAdapter(
         child: Text(
-          'Hotel settings',
+          'Reports',
           style: TextStyle(fontSize: 23, fontWeight: FontWeight.w700),
         ),
       ),
     ),
     SliverPadding(
-      padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
       sliver: SliverToBoxAdapter(
         child: Align(
           alignment: Alignment.topLeft,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 760),
-            child: CustomSurface(
-              child: HotelSettingsForm(onSaved: widget.onSettingsSaved),
-            ),
+            child: const ReportsPanel(),
           ),
         ),
       ),
     ),
   ];
 
-  List<Widget> _more() => [
-    SliverToBoxAdapter(
-      child: widget.membershipBanner ?? const SizedBox.shrink(),
+  Widget _settingsTile(
+    String action,
+    String label,
+    IconData icon, {
+    String? subtitle,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: CustomSurface(
+      padding: EdgeInsets.zero,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 5),
+        leading: Icon(
+          icon,
+          color: action == 'logout' ? CustomColors.error : CustomColors.primary,
+        ),
+        title: Text(label, style: const TextStyle(fontSize: 14)),
+        subtitle: subtitle == null
+            ? null
+            : Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: CustomColors.muted),
+              ),
+        trailing: const Icon(Icons.chevron_right_rounded, size: 18),
+        onTap: () => widget.onAction(action),
+      ),
     ),
+  );
+
+  List<Widget> _settings() => [
     const SliverPadding(
-      padding: EdgeInsets.fromLTRB(18, 0, 18, 12),
+      padding: EdgeInsets.fromLTRB(18, 18, 18, 12),
       sliver: SliverToBoxAdapter(
         child: Row(
           children: [
             Expanded(
               child: Text(
-                'Hotel tools',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                'Settings',
+                style: TextStyle(fontSize: 23, fontWeight: FontWeight.w700),
               ),
             ),
             HotelCloudStatusChip(),
@@ -480,35 +509,43 @@ class _HotelDashboardViewState extends State<HotelDashboardView> {
         ),
       ),
     ),
+    SliverToBoxAdapter(
+      child: widget.membershipBanner ?? const SizedBox.shrink(),
+    ),
     SliverPadding(
       padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
-      sliver: SliverList.list(
-        children: [
-          for (final a in _actions.where(
-            (a) => !['add', 'edit', 'delete', 'settings'].contains(a.$1),
-          ))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: CustomSurface(
-                padding: EdgeInsets.zero,
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 5,
-                  ),
-                  leading: Icon(
-                    a.$3,
-                    color: a.$1 == 'logout'
-                        ? CustomColors.error
-                        : CustomColors.primary,
-                  ),
-                  title: Text(a.$2, style: const TextStyle(fontSize: 14)),
-                  trailing: const Icon(Icons.chevron_right_rounded, size: 18),
-                  onTap: () => widget.onAction(a.$1),
+      sliver: SliverToBoxAdapter(
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const CustomSectionTitle(
+                  'Hotel',
+                  padding: EdgeInsets.fromLTRB(2, 4, 2, 10),
                 ),
-              ),
+                _settingsTile(
+                  'settings',
+                  'Edit hotel information',
+                  Icons.storefront_outlined,
+                  subtitle: widget.hotelName,
+                ),
+                const CustomSectionTitle('Hotel tools'),
+                for (final a in _actions.where(
+                  (a) => [
+                    'customers',
+                    'expenses',
+                    'contact',
+                    'logout',
+                  ].contains(a.$1),
+                ))
+                  _settingsTile(a.$1, a.$2, a.$3),
+              ],
             ),
-        ],
+          ),
+        ),
       ),
     ),
   ];
@@ -564,7 +601,7 @@ class _HotelDashboardViewState extends State<HotelDashboardView> {
                   : section == 1
                   ? _editRooms()
                   : section == 2
-                  ? _more()
+                  ? _reports()
                   : _settings(),
             ),
           ),
@@ -609,9 +646,9 @@ class _HotelDashboardViewState extends State<HotelDashboardView> {
                   label: 'Edit rooms',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.widgets_outlined),
-                  selectedIcon: Icon(Icons.widgets_rounded),
-                  label: 'More',
+                  icon: Icon(Icons.insights_outlined),
+                  selectedIcon: Icon(Icons.insights_rounded),
+                  label: 'Reports',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.settings_outlined),

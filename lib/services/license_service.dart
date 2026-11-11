@@ -24,6 +24,9 @@ class LicenseService extends ChangeNotifier {
   DateTime? trialStart;
   DateTime? trialEndsAt;
   DateTime? expiresAt;
+
+  /// Paid plan name from the redeemed key, e.g. "3 months".
+  String planLabel = '';
   String statusMessage = '';
   String? lastError;
   String? pinHash;
@@ -171,6 +174,7 @@ class LicenseService extends ChangeNotifier {
       cloudView = assessment.view;
       statusMessage = assessment.message;
       expiresAt = cloudExpiry;
+      planLabel = '${data?['planLabel'] ?? ''}'.trim();
       trialEndsAt = cloudTrialEnd;
       activated = assessment.view == HotelLicenseView.activated;
       if (cloudStart != null &&

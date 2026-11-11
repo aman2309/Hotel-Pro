@@ -35,6 +35,7 @@ class HotelCloudSyncService extends ChangeNotifier {
   String? lastError;
   bool allowPush = false;
   bool applyingRemote = false;
+  bool _pullAgain = false;
   bool restoredThisSession = false;
   bool _bootstrapped = false;
   final _bootstrapTask = RetryableTask<void>();
@@ -530,8 +531,14 @@ class HotelCloudSyncService extends ChangeNotifier {
   }
 
   Future<bool> pullFromCloud() async {
-    if (_pullFuture != null ||
-        !_bootstrapped ||
+    if (_pullFuture != null || applyingRemote) {
+      // A change (often the photo metadata patch that lands a few seconds
+      // after a booking) arrived mid-pull. Re-pull once this one finishes so
+      // it is not lost until some unrelated edit.
+      _pullAgain = true;
+      return false;
+    }
+    if (!_bootstrapped ||
         !isReady ||
         applyingRemote ||
         _checkpointing ||
@@ -561,6 +568,10 @@ class HotelCloudSyncService extends ChangeNotifier {
       completer.complete();
       _pullFuture = null;
       notifyListeners();
+      if (_pullAgain) {
+        _pullAgain = false;
+        unawaited(pullFromCloud());
+      }
     }
   }
 
@@ -628,6 +639,7 @@ class HotelCloudSyncService extends ChangeNotifier {
                 .values,
         closedRooms:
             (cloud['closedRooms'] ?? <String, Map<String, dynamic>>{}).values,
+        roomDocs: (cloud['rooms'] ?? <String, Map<String, dynamic>>{}).values,
       );
       if (!HotelDataBuffer.cloudOnly &&
           _flatten(cloud).values.every((doc) => doc['deleted'] == true)) {
@@ -651,24 +663,27 @@ class HotelCloudSyncService extends ChangeNotifier {
           CloudSyncService.customerKey,
         ),
       );
+      final photos = HotelPhotoStorageService.instance;
       for (final guest in guests) {
         for (final previous in previousGuests) {
           if (previous.customerId != guest.customerId) continue;
           final doc = cloud['guests']?[guest.customerId];
           if ((doc?['idFrontSha256'] == null &&
                   previous.mobile == guest.mobile) ||
-              HotelPhotoStorageService.sha256OfBase64(
-                    previous.idFrontPhotoPath,
-                  ) ==
-                  doc?['idFrontSha256']) {
+              await photos.isLocalCopyOf(
+                previous.idFrontPhotoPath,
+                sha: doc?['idFrontSha256'],
+                storagePath: doc?['idFrontStoragePath'],
+              )) {
             guest.idFrontPhotoPath = previous.idFrontPhotoPath;
           }
           if ((doc?['idBackSha256'] == null &&
                   previous.mobile == guest.mobile) ||
-              HotelPhotoStorageService.sha256OfBase64(
-                    previous.idBackPhotoPath,
-                  ) ==
-                  doc?['idBackSha256']) {
+              await photos.isLocalCopyOf(
+                previous.idBackPhotoPath,
+                sha: doc?['idBackSha256'],
+                storagePath: doc?['idBackStoragePath'],
+              )) {
             guest.idBackPhotoPath = previous.idBackPhotoPath;
           }
         }

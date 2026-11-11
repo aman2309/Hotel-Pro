@@ -8,7 +8,7 @@ Future<bool> showHotelSettingsDialog(BuildContext context) async =>
       context: context,
       barrierDismissible: false,
       builder: (context) => CustomDialog(
-        title: const Text('Hotel settings'),
+        title: const Text('Edit hotel information'),
         content: HotelSettingsForm(
           onSaved: () => Navigator.pop(context, true),
           onCancel: () => Navigator.pop(context, false),

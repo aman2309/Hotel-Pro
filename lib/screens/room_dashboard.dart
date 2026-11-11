@@ -2,6 +2,7 @@ import '../widgets/available_room_actions.dart';
 import '../widgets/custom_bottom_sheet.dart';
 import 'hotel_dashboard_view.dart';
 import '../widgets/hotel_ui.dart';
+import '../widgets/future_booking_badge.dart';
 import '../theme/custom_colors.dart';
 import '../theme/app_theme.dart';
 import 'dart:async';
@@ -18,11 +19,13 @@ import '../services/hotel_cloud_sync_service.dart';
 import '../services/hotel_sync_plan.dart';
 import '../dialogs/booking_view_dialog.dart';
 import '../dialogs/cancel_future_booking_sheet.dart';
+import '../dialogs/contact_us_dialog.dart';
 import '../dialogs/bill_preview_dialog.dart';
 import '../dialogs/booking_dialog.dart';
 import '../models/room.dart';
 import '../models/customer.dart';
 import '../models/bill_record.dart';
+import '../utils/stay_duration.dart';
 import '../stores/bill_store.dart';
 import '../stores/customer_store.dart';
 import '../stores/expense_store.dart';
@@ -242,7 +245,9 @@ class _RoomDashboardState extends State<RoomDashboard>
 
       for (final Room room in rooms) {
         if (room.status == "BOOKED" && room.bookingTime == null) {
-          room.bookingTime = room.bookingDate ?? DateTime.now();
+          // Legacy stays without a recorded start: booking-day noon, which is
+          // stable across reloads, instead of a reset-prone DateTime.now().
+          room.bookingTime = bookingStartFallback(room.bookingDate);
         }
       }
     });
@@ -1154,7 +1159,7 @@ class _RoomDashboardState extends State<RoomDashboard>
         builder: (BuildContext futureContext) {
           return CustomDialog(
             title: Text("ROOM ${room.roomNumber}"),
-            content: const Text("This room has a Future Booking"),
+            content: FutureBookingBadge(room),
             actions: [
               CustomButton.text(
                 onPressed: () {
@@ -1266,18 +1271,8 @@ class _RoomDashboardState extends State<RoomDashboard>
                 Text("Normal Rent : ₹${room.normalRent} / Day"),
                 if (room.futureBooking && room.futureBookingDate != null) ...[
                   const SizedBox(height: 15),
-                  Text(
-                    "Future booking",
-                    style: TextStyle(
-                      color: AppColors.ink,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    "Booking Date : "
-                    "${formatDate(room.futureBookingDate!)}",
-                  ),
+                  FutureBookingBadge(room),
+                  const SizedBox(height: 6),
                   Text(
                     "Booking Time : "
                     "${formatTimeRange(room.futureBookingDate!, room.futureBookingEnd)}",
@@ -2006,6 +2001,7 @@ class _RoomDashboardState extends State<RoomDashboard>
         'settings',
         'backup',
         'fresh',
+        'contact',
       }.contains(action)) {
         await _handleMenuAction(action);
       } else {
@@ -2107,6 +2103,9 @@ class _RoomDashboardState extends State<RoomDashboard>
         break;
       case "delete":
         await deleteRoom();
+        break;
+      case "contact":
+        await showContactUsDialog(context);
         break;
     }
   }

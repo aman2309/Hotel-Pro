@@ -6,6 +6,7 @@ import 'package:my_first_app/theme/app_theme.dart';
 
 class FakeAdminApi extends AdminApi {
   final calls = <String>[];
+  final sent = <String, Map<String, dynamic>>{};
   final hotel = <String, dynamic>{
     'hotelId': 'hotel-test',
     'hotelName': 'Test Hotel',
@@ -39,9 +40,10 @@ class FakeAdminApi extends AdminApi {
     Map<String, dynamic> data = const {},
   ]) async {
     calls.add(name);
+    sent[name] = data;
     return switch (name) {
       'adminListHotelsV2' => {
-        'items': [hotel],
+        'items': [if (!calls.contains('adminDeleteHotel')) hotel],
       },
       'adminHotelDetails' => hotel,
       'adminHotelRecords' => {
@@ -91,6 +93,23 @@ void main() {
       expect(find.text('Hotel information'), findsOneWidget);
       expect(api.calls, contains('adminHotelDetails'));
       expect(api.calls, contains('adminHotelRecords'));
+      final delete = find.text('Delete hotel');
+      await tester.ensureVisible(delete);
+      await tester.tap(delete);
+      await tester.pumpAndSettle();
+      expect(find.text('Delete Test Hotel?'), findsOneWidget);
+      await tester.tap(find.text('Keep unchanged'));
+      await tester.pumpAndSettle();
+      expect(api.calls, isNot(contains('adminDeleteHotel')));
+      await tester.tap(delete);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete permanently'));
+      await tester.pumpAndSettle();
+      expect(api.sent['adminDeleteHotel'], {
+        'hotelId': 'hotel-test',
+        'confirmHotelId': 'hotel-test',
+      });
+      expect(find.text('Test Hotel'), findsNothing);
       expect(tester.takeException(), isNull);
     });
   }
@@ -119,7 +138,20 @@ void main() {
     expect(find.byType(BottomSheet), findsNothing);
     await tester.tap(find.text('Generate key').last);
     await tester.pumpAndSettle();
+    expect(api.calls, isNot(contains('adminIssueLicenseKey')));
+    await tester.tap(find.text('3 months'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Generate 3 months key'));
+    await tester.pumpAndSettle();
+    expect(api.calls, isNot(contains('adminIssueLicenseKey')));
+    await tester.tap(find.text('Payment of ₹2,500 received'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Generate 3 months key'));
+    await tester.pumpAndSettle();
     expect(api.calls, contains('adminIssueLicenseKey'));
+    expect(api.sent['adminIssueLicenseKey']!['planId'], '3m');
+    expect(api.sent['adminIssueLicenseKey']!['paymentReceived'], isTrue);
+    expect(find.text('3 months plan · ₹2,500 paid'), findsOneWidget);
     expect(find.text('Your license key is ready'), findsOneWidget);
     expect(
       find.text('HP-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-AAAA-BBBB'),

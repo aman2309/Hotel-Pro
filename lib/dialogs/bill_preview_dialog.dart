@@ -1,16 +1,14 @@
 import '../widgets/custom_bottom_sheet.dart';
 import '../theme/custom_colors.dart';
-import '../widgets/custom_button.dart';
-import '../widgets/custom_dialog.dart';
-import '../theme/app_theme.dart';
+import '../widgets/hotel_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
 import '../models/bill_record.dart';
 import '../models/room.dart';
 import '../stores/hotel_settings_store.dart';
+import '../services/document_output.dart';
 
 Future<void> showBillPreviewDialog(
   BuildContext context,
@@ -326,195 +324,211 @@ class _BillPreviewDialogState extends State<BillPreviewDialog> {
       ),
     );
 
-    await Printing.layoutPdf(
-      name: bill.billNumber,
-      dynamicLayout: false,
-      onLayout: (PdfPageFormat format) async {
-        return document.save();
-      },
-    );
+    await DocumentOutput.printPdf(await document.save(), name: bill.billNumber);
   }
 
-  Widget detail(String title, String value, {bool bold = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 190,
-            child: Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ),
-        ],
+  Widget hotelLine(String text, {bool bold = false}) {
+    return Text(
+      text,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: 11,
+        height: 1.5,
+        color: bold ? CustomColors.text : CustomColors.muted,
+        fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final int payable = gstOnBill
+        ? grandTotal()
+        : bill.totalBill - bill.discount;
+    final int due = isCheckedOut ? 0 : balanceDue();
+
     return CustomDialog(
-      titlePadding: EdgeInsets.zero,
-      title: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: const BoxDecoration(color: AppColors.ink),
-        child: Column(
-          children: [
-            Text(
-              HotelSettingsStore.hotelName.toUpperCase(),
-              style: const TextStyle(
-                color: CustomColors.surface,
-                fontSize: 25,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              "Final room bill",
-              style: TextStyle(color: CustomColors.surface, fontSize: 15),
-            ),
-            const SizedBox(height: 7),
-            Text(
-              HotelSettingsStore.hotelAddress.toUpperCase(),
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: CustomColors.surface, fontSize: 11),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              "Mobile: ${HotelSettingsStore.hotelMobile.isEmpty ? "-" : HotelSettingsStore.hotelMobile}",
-              style: const TextStyle(color: CustomColors.surface, fontSize: 11),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              "Registration No.: ${HotelSettingsStore.registrationNumber.isEmpty ? "-" : HotelSettingsStore.registrationNumber}",
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: CustomColors.surface, fontSize: 11),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              "GST No.: ${HotelSettingsStore.gstNumber.isEmpty ? "-" : HotelSettingsStore.gstNumber}",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: CustomColors.surface,
-                fontSize: 11,
-                fontWeight: gstOnBill ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
+      icon: const CustomIconBadge(Icons.receipt_long_rounded),
+      title: CustomSheetTitle(
+        "Bill ${bill.billNumber}",
+        subtitle: "Room ${bill.roomNumber} · ${bill.guestName}",
       ),
       content: SizedBox(
         width: 650,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              detail("Bill Number", bill.billNumber, bold: true),
-              detail("Customer ID", bill.customerId),
-              detail("Guest Name", bill.guestName),
-              detail("Mobile Number", bill.mobile),
-              const Divider(),
-              detail("Room", "${bill.roomNumber} - ${bill.roomType}"),
-              detail(
-                "Booking Date / Time",
-                formatDateTime(bill.bookingTime ?? bill.bookingDate),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: CustomColors.neutralTint,
+                borderRadius: BorderRadius.circular(20),
               ),
-              detail("Checkout Date / Time", formatDateTime(bill.checkoutTime)),
-              detail("Stay Duration", stayDuration(), bold: true),
-              const Divider(),
-              detail("Room Rate", "₹${bill.roomRate} / Day"),
-              detail("Booked Days", bill.bookedDays.toString()),
-              detail("Room Bill", "₹${bill.roomBill}"),
-              const SizedBox(height: 10),
-              const Text(
-                "Extra charges",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              child: Column(
+                children: [
+                  Text(
+                    HotelSettingsStore.hotelName,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (HotelSettingsStore.hotelAddress.isNotEmpty)
+                    hotelLine(HotelSettingsStore.hotelAddress),
+                  hotelLine(
+                    [
+                      if (HotelSettingsStore.hotelMobile.isNotEmpty)
+                        "Mobile ${HotelSettingsStore.hotelMobile}",
+                      if (HotelSettingsStore.registrationNumber.isNotEmpty)
+                        "Reg. ${HotelSettingsStore.registrationNumber}",
+                    ].join(" · "),
+                  ),
+                  if (HotelSettingsStore.gstNumber.isNotEmpty)
+                    hotelLine(
+                      "GST ${HotelSettingsStore.gstNumber}",
+                      bold: gstOnBill,
+                    ),
+                  const SizedBox(height: 14),
+                  Text(
+                    gstOnBill ? "Grand total" : "Final bill",
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: CustomColors.muted,
+                    ),
+                  ),
+                  Text(
+                    "₹$payable",
+                    style: const TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w700,
+                      height: 1.25,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  CustomStatusBadge(
+                    label: due > 0
+                        ? "Balance due ₹$due"
+                        : isCheckedOut
+                        ? "Paid · Checked out"
+                        : "Fully paid",
+                    color: due > 0
+                        ? CustomColors.error
+                        : CustomColors.available,
+                  ),
+                ],
               ),
-              const SizedBox(height: 5),
-              if (bill.charges.isEmpty) const Text("No Extra Charges"),
-              ...bill.charges.map(
-                (charge) => detail(
-                  Room.extraChargeTitle(charge),
-                  "₹${charge["amount"] ?? 0}",
+            ),
+            const CustomSectionTitle("Guest"),
+            CustomDetailCard(
+              children: [
+                CustomDetailRow("Guest name", bill.guestName),
+                CustomDetailRow("Mobile number", bill.mobile),
+              ],
+            ),
+            const CustomSectionTitle("Stay"),
+            CustomDetailCard(
+              children: [
+                CustomDetailRow(
+                  "Room",
+                  "${bill.roomNumber} · ${bill.roomType}",
                 ),
-              ),
-              const Divider(),
-              detail("TOTAL BILL", "₹${bill.totalBill}", bold: true),
-              detail("DISCOUNT", "₹${bill.discount}"),
-              if (gstOnBill) ...[
-                detail("TAXABLE AMOUNT", "₹${subtotal()}", bold: true),
-                detail(
-                  "GST (${gstRateLabel()}%)",
-                  "₹${gstAmount()}",
-                  bold: true,
+                CustomDetailRow(
+                  "Check-in",
+                  formatDateTime(bill.bookingTime ?? bill.bookingDate),
                 ),
-                detail("GRAND TOTAL", "₹${grandTotal()}", bold: true),
-              ] else
-                detail(
-                  "FINAL BILL",
-                  "₹${bill.totalBill - bill.discount}",
-                  bold: true,
+                CustomDetailRow("Check-out", formatDateTime(bill.checkoutTime)),
+                CustomDetailRow("Stay duration", stayDuration(), strong: true),
+              ],
+            ),
+            const CustomSectionTitle("Charges"),
+            CustomDetailCard(
+              children: [
+                CustomDetailRow("Room rate", "₹${bill.roomRate} / day"),
+                CustomDetailRow("Booked days", bill.bookedDays.toString()),
+                CustomDetailRow("Room bill", "₹${bill.roomBill}"),
+                if (bill.charges.isEmpty)
+                  const CustomDetailRow("Extra charges", "None")
+                else
+                  ...bill.charges.map(
+                    (charge) => CustomDetailRow(
+                      Room.extraChargeTitle(charge),
+                      "₹${charge["amount"] ?? 0}",
+                    ),
+                  ),
+                const CustomDetailDivider(),
+                CustomDetailRow("Total bill", "₹${bill.totalBill}"),
+                CustomDetailRow(
+                  "Discount",
+                  bill.discount > 0 ? "− ₹${bill.discount}" : "₹0",
+                  valueColor: bill.discount > 0 ? CustomColors.available : null,
                 ),
-              const SizedBox(height: 8),
-              const Text(
-                "Payment summary",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 5),
-              detail(
-                "ADVANCE",
-                "₹${bill.advance}  (${bill.advancePaymentMode.isEmpty ? "-" : bill.advancePaymentMode})",
-              ),
-              if (bill.partPayments.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                const Text(
-                  "Part payment history",
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                if (gstOnBill) ...[
+                  CustomDetailRow("Taxable amount", "₹${subtotal()}"),
+                  CustomDetailRow(
+                    "GST (${gstRateLabel()}%)",
+                    "₹${gstAmount()}",
+                  ),
+                  const CustomDetailDivider(),
+                  CustomDetailRow(
+                    "Grand total",
+                    "₹${grandTotal()}",
+                    strong: true,
+                  ),
+                ] else ...[
+                  const CustomDetailDivider(),
+                  CustomDetailRow(
+                    "Final bill",
+                    "₹${bill.totalBill - bill.discount}",
+                    strong: true,
+                  ),
+                ],
+              ],
+            ),
+            const CustomSectionTitle("Payments"),
+            CustomDetailCard(
+              children: [
+                CustomDetailRow(
+                  "Advance",
+                  "₹${bill.advance} · ${bill.advancePaymentMode.isEmpty ? "-" : bill.advancePaymentMode}",
                 ),
-                const SizedBox(height: 4),
                 ...bill.partPayments.map(
-                  (payment) => detail(
-                    "${formatPartPaymentDateTime(payment["dateTime"])}  •  ${payment["paymentMode"] ?? "-"}",
-                    "₹${payment["amount"] ?? 0}",
+                  (payment) => CustomDetailRow(
+                    "Part payment\n${formatPartPaymentDateTime(payment["dateTime"])}",
+                    "₹${payment["amount"] ?? 0} · ${payment["paymentMode"] ?? "-"}",
                   ),
                 ),
-                detail(
-                  "TOTAL PART PAYMENT",
-                  "₹${totalPartPayments()}",
-                  bold: true,
+                if (bill.partPayments.isNotEmpty)
+                  CustomDetailRow(
+                    "Total part payment",
+                    "₹${totalPartPayments()}",
+                  ),
+                if (isCheckedOut)
+                  CustomDetailRow(
+                    "Final balance paid",
+                    "₹${bill.balance} · ${bill.paymentMode.isEmpty ? "-" : bill.paymentMode}",
+                  )
+                else
+                  CustomDetailRow(
+                    "Balance due",
+                    "₹${balanceDue()}",
+                    valueColor: balanceDue() > 0 ? CustomColors.error : null,
+                  ),
+                const CustomDetailDivider(),
+                CustomDetailRow(
+                  "Total received",
+                  "₹${amountReceived()}",
+                  strong: true,
                 ),
               ],
-              const SizedBox(height: 6),
-              if (isCheckedOut)
-                detail(
-                  "FINAL BALANCE PAID",
-                  "₹${bill.balance}  (${bill.paymentMode.isEmpty ? "-" : bill.paymentMode})",
-                  bold: true,
-                )
-              else
-                detail("BALANCE DUE", "₹${balanceDue()}", bold: true),
-              const Divider(),
-              detail("TOTAL RECEIVED", "₹${amountReceived()}", bold: true),
-              const SizedBox(height: 15),
-              const Center(
-                child: Text(
-                  "Thank You For Staying With Us",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              "Thank you for staying with us",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: CustomColors.muted),
+            ),
+          ],
         ),
       ),
       actions: [

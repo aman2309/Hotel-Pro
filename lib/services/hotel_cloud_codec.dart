@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/bill_record.dart';
 import '../models/customer.dart';
 import '../models/room.dart';
+import '../utils/stay_duration.dart';
 import 'hotel_cloud_policy.dart';
 import 'hotel_record_ids.dart';
 import 'hotel_photo_ref.dart';
@@ -353,6 +354,7 @@ class HotelCloudCodec {
           'guestAddress': room.guestAddress,
           'bookingDate': room.bookingDate?.toIso8601String(),
           'bookingTime': room.bookingTime?.toIso8601String(),
+          'bookingEndTime': room.bookingEndTime?.toIso8601String(),
           'checkoutTime': room.checkoutTime?.toIso8601String(),
           'days': room.days,
           'roomRate': room.bookingRate,
@@ -667,9 +669,23 @@ class HotelCloudCodec {
     required Iterable<Map<String, dynamic>> bookings,
     required Iterable<Map<String, dynamic>> futureBookings,
     required Iterable<Map<String, dynamic>> closedRooms,
+    Iterable<Map<String, dynamic>> roomDocs = const <Map<String, dynamic>>[],
   }) {
     final Map<int, Room> byNumber = <int, Room>{
       for (final Room room in rooms) room.roomNumber: room,
+    };
+    // Booking docs are keyed by room number (bkg_room_<n>), so a doc left over
+    // from an earlier stay must never override a room that changed after it —
+    // whatever the room's current status. A room freshly re-booked must keep
+    // its new start time. Booking and room docs are written in one
+    // transaction, so the current booking carries the same updatedAtMs and
+    // still merges.
+    final Map<int, int> roomUpdatedAt = <int, int>{
+      for (final Map<String, dynamic> doc in roomDocs)
+        if (doc['deleted'] != true &&
+            _asIntOrNull(doc['roomNumber']) != null &&
+            _asIntOrNull(doc['updatedAtMs']) != null)
+          _asIntOrNull(doc['roomNumber'])!: _asIntOrNull(doc['updatedAtMs'])!,
     };
 
     for (final Map<String, dynamic> doc in bookings) {
@@ -685,6 +701,11 @@ class HotelCloudCodec {
       }
       final Room? room = byNumber[roomNumber];
       if (room == null) {
+        continue;
+      }
+      final int? bookingAt = _asIntOrNull(doc['updatedAtMs']);
+      final int? roomAt = roomUpdatedAt[roomNumber];
+      if (bookingAt != null && roomAt != null && bookingAt < roomAt) {
         continue;
       }
       _applyLiveBooking(room, local);
@@ -757,9 +778,16 @@ class HotelCloudCodec {
       room.paymentMode = booking['paymentMode']?.toString() ?? room.paymentMode;
       room.billNumber = booking['billNumber']?.toString() ?? room.billNumber;
       room.applyGst = booking['applyGst'] == true || room.applyGst;
-      room.bookingDate = _asDate(booking['bookingDate']) ?? room.bookingDate;
-      room.bookingTime = _asDate(booking['bookingTime']) ?? room.bookingTime;
-      room.checkoutTime = _asDate(booking['checkoutTime']) ?? room.checkoutTime;
+      // The applied stay carries its own start. A value still sitting on the
+      // room belongs to an earlier stay of the same room number and must never
+      // become this stay's start or frozen checkout. Missing timestamps fall
+      // back to booking-day noon, mirroring the dashboard backfill.
+      final DateTime? bookingDate = _asDate(booking['bookingDate']);
+      final DateTime? bookingTime = _asDate(booking['bookingTime']);
+      room.bookingDate = bookingDate ?? bookingTime;
+      room.bookingTime = bookingTime ?? bookingStartFallback(bookingDate);
+      room.bookingEndTime = _asDate(booking['bookingEndTime']);
+      room.checkoutTime = _asDate(booking['checkoutTime']);
     }
     if (room.extraGuests.isEmpty) {
       room.extraGuests = _asMapList(booking['extraGuests']);

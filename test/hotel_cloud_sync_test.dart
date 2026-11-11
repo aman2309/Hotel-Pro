@@ -370,6 +370,165 @@ void main() {
     expect(HotelCloudCodec.localPhotoString('not-a-path'), isEmpty);
   });
 
+  test('stale per-room booking doc never revives an old start time', () {
+    final HotelCloudCodec codec = HotelCloudCodec(deviceId: 'devA');
+    final List<Map<String, dynamic>> roomDocs = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'roomNumber': 101,
+        'roomType': 'Deluxe',
+        'normalRent': 1500,
+        'status': 'EMPTY',
+        'updatedAtMs': 2000,
+      },
+    ];
+    final List<Room> rooms = codec.roomsFromCloud(roomDocs);
+    codec.mergeRelatedIntoRooms(
+      rooms: rooms,
+      roomDocs: roomDocs,
+      bookings: <Map<String, dynamic>>[
+        <String, dynamic>{
+          'bookingId': 'bkg_room_101',
+          'roomNumber': 101,
+          'guestName': 'Old guest',
+          'status': 'BOOKED',
+          'bookingTime': '2026-11-01T12:00:00.000',
+          'updatedAtMs': 1000,
+        },
+      ],
+      futureBookings: const <Map<String, dynamic>>[],
+      closedRooms: const <Map<String, dynamic>>[],
+    );
+    expect(rooms.single.status, 'EMPTY');
+    expect(rooms.single.bookingTime, isNull);
+  });
+
+  test('rebooked room takes the new stay start, not the earlier stay time', () {
+    final HotelCloudCodec codec = HotelCloudCodec(deviceId: 'devB');
+    // Room 101 was checked out minutes ago: status CLEANING still carries the
+    // previous stay's timestamps until cleaning completes.
+    final List<Map<String, dynamic>> roomDocs = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'roomNumber': 101,
+        'roomType': 'Deluxe',
+        'normalRent': 1500,
+        'status': 'CLEANING',
+        'bookingTime': '2026-11-01T12:00:00.000',
+        'bookingEndTime': '2026-11-02T11:00:00.000',
+        'checkoutTime': '2026-11-02T10:30:00.000',
+        'updatedAtMs': 3000,
+      },
+    ];
+    final List<Room> rooms = codec.roomsFromCloud(roomDocs);
+    codec.mergeRelatedIntoRooms(
+      rooms: rooms,
+      roomDocs: roomDocs,
+      bookings: <Map<String, dynamic>>[
+        <String, dynamic>{
+          'bookingId': 'bkg_room_101',
+          'roomNumber': 101,
+          'guestName': 'New guest',
+          'mobile': '9999999999',
+          'status': 'BOOKED',
+          'bookingDate': '2026-11-02T00:00:00.000',
+          'bookingTime': '2026-11-02T14:05:00.000',
+          'bookingEndTime': '2026-11-03T11:00:00.000',
+          'updatedAtMs': 4000,
+        },
+      ],
+      futureBookings: const <Map<String, dynamic>>[],
+      closedRooms: const <Map<String, dynamic>>[],
+    );
+    final Room room = rooms.single;
+    expect(room.status, 'BOOKED');
+    expect(room.guestName, 'New guest');
+    expect(room.bookingTime, DateTime(2026, 11, 2, 14, 5));
+    expect(room.bookingDate, DateTime(2026, 11, 2));
+    expect(room.bookingEndTime, DateTime(2026, 11, 3, 11));
+    // A fresh stay has not checked out; the previous stay's checkout must
+    // not freeze the new stay's timer.
+    expect(room.checkoutTime, isNull);
+  });
+
+  test('applied booking without timestamps starts now, not from stale room', () {
+    final HotelCloudCodec codec = HotelCloudCodec(deviceId: 'devB');
+    final DateTime before = DateTime.now();
+    final List<Map<String, dynamic>> roomDocs = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'roomNumber': 102,
+        'roomType': 'Standard',
+        'normalRent': 1200,
+        'status': 'CLEANING',
+        'bookingTime': '2026-10-01T12:00:00.000',
+        'checkoutTime': '2026-10-04T10:30:00.000',
+        'updatedAtMs': 3000,
+      },
+    ];
+    final List<Room> rooms = codec.roomsFromCloud(roomDocs);
+    codec.mergeRelatedIntoRooms(
+      rooms: rooms,
+      roomDocs: roomDocs,
+      bookings: <Map<String, dynamic>>[
+        <String, dynamic>{
+          'bookingId': 'bkg_room_102',
+          'roomNumber': 102,
+          'guestName': 'Legacy booking',
+          'status': 'BOOKED',
+          'updatedAtMs': 4000,
+        },
+      ],
+      futureBookings: const <Map<String, dynamic>>[],
+      closedRooms: const <Map<String, dynamic>>[],
+    );
+    final DateTime after = DateTime.now();
+    final Room room = rooms.single;
+    expect(room.status, 'BOOKED');
+    expect(room.bookingTime, isNotNull);
+    // Neither the stale room time nor the stale checkout survives: the
+    // stay starts when this restore confirms it.
+    expect(room.bookingTime!.isAfter(before.subtract(
+      const Duration(seconds: 1),
+    )), isTrue);
+    expect(room.bookingTime!.isBefore(after.add(
+      const Duration(seconds: 1),
+    )), isTrue);
+    expect(room.checkoutTime, isNull);
+  });
+
+  test('booking doc carries the stay start and expected checkout', () {
+    final Room room = Room(
+      roomNumber: 103,
+      roomType: 'Deluxe',
+      normalRent: 1500,
+      status: 'BOOKED',
+      guestName: 'Rahul',
+      mobile: '9999999999',
+      bookingDate: DateTime(2026, 11, 2),
+      bookingTime: DateTime(2026, 11, 2, 14, 5),
+      bookingEndTime: DateTime(2026, 11, 3, 11),
+      days: 1,
+      bookingRate: 1500,
+    );
+    final HotelCloudSnapshot snap = HotelCloudCodec(
+      deviceId: 'devA',
+      updatedAtMs: 1,
+    ).build(
+      rooms: <Room>[room],
+      bills: const <BillRecord>[],
+      guests: const <Customer>[],
+      expenses: const <Map<String, dynamic>>[],
+      settings: <String, dynamic>{'hotel_name': 'Park'},
+    );
+    final Map<String, dynamic> booking = snap.docs
+        .firstWhere(
+          (HotelCloudDoc doc) =>
+              doc.collection == 'bookings' && doc.id == 'bkg_room_103',
+        )
+        .data;
+    expect(booking['bookingTime'], '2026-11-02T14:05:00.000');
+    expect(booking['bookingEndTime'], '2026-11-03T11:00:00.000');
+    expect(booking['checkoutTime'], isNull);
+  });
+
   test('cloud restore merges live booking and future booking onto rooms', () {
     final HotelCloudCodec codec = HotelCloudCodec(
       deviceId: 'devA',

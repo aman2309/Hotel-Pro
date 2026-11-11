@@ -74,7 +74,12 @@ void main() {
             .every((c) => c.room.status == 'BOOKED'),
         isTrue,
       );
-      await tester.tap(find.text('More'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Settings'),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Hotel tools'), findsOneWidget);
       expect(tester.takeException(), isNull);

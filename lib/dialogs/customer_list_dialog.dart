@@ -1,9 +1,7 @@
 import '../utils/stay_duration.dart' as stay_time;
 import '../widgets/custom_bottom_sheet.dart';
 import '../theme/custom_colors.dart';
-import '../widgets/custom_button.dart';
-import '../widgets/custom_dialog.dart';
-import '../widgets/custom_text_field.dart';
+import '../widgets/hotel_ui.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -11,13 +9,13 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
 import '../models/customer.dart';
 import '../services/hotel_photo_bytes.dart';
 import '../services/id_card_ocr.dart';
 import '../stores/customer_store.dart';
 import '../stores/hotel_settings_store.dart';
+import '../services/document_output.dart';
 
 Future<void> printCustomerId(Customer customer) async {
   final pw.Document pdf = pw.Document();
@@ -145,10 +143,9 @@ Future<void> printCustomerId(Customer customer) async {
     ),
   );
 
-  await Printing.layoutPdf(
+  await DocumentOutput.printPdf(
+    await pdf.save(),
     name: "Customer_ID_${customer.customerId}.pdf",
-    dynamicLayout: false,
-    onLayout: (PdfPageFormat format) async => pdf.save(),
   );
 }
 
@@ -200,101 +197,117 @@ Future<void> showCustomerStayHistoryDialog(
           .toList();
 
       return CustomDialog(
-        title: Text("${customer.customerId} - STAY HISTORY"),
+        icon: const CustomIconBadge(Icons.history_rounded),
+        title: CustomSheetTitle(
+          "Stay history",
+          subtitle:
+              "${customer.guestName.isEmpty ? "Guest" : customer.guestName} · ${history.length} ${history.length == 1 ? "stay" : "stays"}",
+        ),
         content: SizedBox(
           width: 720,
-          height: 520,
           child: history.isEmpty
-              ? const Center(
-                  child: Text(
-                    "No stay history available",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
+              ? const CustomEmptyState(
+                  title: "No stays yet",
+                  message: "Past stays appear here after the guest checks out.",
+                  icon: Icons.history_rounded,
                 )
-              : ListView.builder(
-                  itemCount: history.length,
-                  itemBuilder: (BuildContext context, int index) {
-                    final Map<String, dynamic> stay = history[index];
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "STAY ${history.length - index}",
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (int index = 0; index < history.length; index++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: CustomSurface(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      "Stay ${history.length - index}",
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  CustomStatusBadge(
+                                    label:
+                                        "Room ${history[index]["roomNumber"] ?? "-"}",
+                                    color: CustomColors.primary,
+                                  ),
+                                ],
                               ),
-                            ),
-                            const Divider(),
-                            Text(
-                              "Room Number : "
-                              "${stay["roomNumber"] ?? "-"}",
-                            ),
-                            Text(
-                              "Booking Date : "
-                              "${formatHistoryDateTime(stay["bookingDate"])}",
-                            ),
-                            Text(
-                              "Booking Time : "
-                              "${formatHistoryDateTime(stay["bookingTime"])}",
-                            ),
-                            Text(
-                              "Checkout Time : "
-                              "${formatHistoryDateTime(stay["checkoutTime"])}",
-                            ),
-                            Text(
-                              "Stay Duration : "
-                              "${historyDuration(stay["bookingTime"], stay["checkoutTime"])}",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                              const SizedBox(height: 6),
+                              CustomDetailRow(
+                                "Booked on",
+                                formatHistoryDateTime(
+                                  history[index]["bookingDate"],
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              "Room Rate : "
-                              "₹${stay["roomRate"] ?? 0}",
-                            ),
-                            Text(
-                              "Booked Days : "
-                              "${stay["days"] ?? 0}",
-                            ),
-                            Text(
-                              "Room Bill : "
-                              "₹${stay["roomBill"] ?? 0}",
-                            ),
-                            Text(
-                              "Extra Charges : "
-                              "₹${stay["extraCharges"] ?? 0}",
-                            ),
-                            Text(
-                              "Total Bill : "
-                              "₹${stay["totalBill"] ?? 0}",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                              CustomDetailRow(
+                                "Check-in",
+                                formatHistoryDateTime(
+                                  history[index]["bookingTime"],
+                                ),
                               ),
-                            ),
-                            Text(
-                              "Advance : "
-                              "₹${stay["advance"] ?? 0}",
-                            ),
-                            Text(
-                              "Balance : "
-                              "₹${stay["balance"] ?? 0}",
-                            ),
-                            Text(
-                              "Payment Mode : "
-                              "${stay["paymentMode"] ?? "-"}",
-                            ),
-                          ],
+                              CustomDetailRow(
+                                "Check-out",
+                                formatHistoryDateTime(
+                                  history[index]["checkoutTime"],
+                                ),
+                              ),
+                              CustomDetailRow(
+                                "Stay duration",
+                                historyDuration(
+                                  history[index]["bookingTime"],
+                                  history[index]["checkoutTime"],
+                                ),
+                                strong: true,
+                              ),
+                              const CustomDetailDivider(),
+                              CustomDetailRow(
+                                "Room rate",
+                                "₹${history[index]["roomRate"] ?? 0} / day",
+                              ),
+                              CustomDetailRow(
+                                "Booked days",
+                                "${history[index]["days"] ?? 0}",
+                              ),
+                              CustomDetailRow(
+                                "Room bill",
+                                "₹${history[index]["roomBill"] ?? 0}",
+                              ),
+                              CustomDetailRow(
+                                "Extra charges",
+                                "₹${history[index]["extraCharges"] ?? 0}",
+                              ),
+                              CustomDetailRow(
+                                "Advance",
+                                "₹${history[index]["advance"] ?? 0}",
+                              ),
+                              CustomDetailRow(
+                                "Balance",
+                                "₹${history[index]["balance"] ?? 0}",
+                              ),
+                              CustomDetailRow(
+                                "Payment mode",
+                                "${history[index]["paymentMode"] ?? "-"}",
+                              ),
+                              const CustomDetailDivider(),
+                              CustomDetailRow(
+                                "Total bill",
+                                "₹${history[index]["totalBill"] ?? 0}",
+                                strong: true,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    );
-                  },
+                  ],
                 ),
         ),
         actions: [
@@ -557,7 +570,7 @@ Future<bool?> showEditCustomerDialog(
           }
 
           return CustomDialog(
-            title: Text("EDIT CUSTOMER - ${customer.customerId}"),
+            title: const Text("Edit guest"),
             content: SizedBox(
               width: 650,
               child: SingleChildScrollView(
@@ -687,14 +700,152 @@ Future<bool?> showEditCustomerDialog(
   return result;
 }
 
+/// Full guest details with edit, print and stay-history actions.
+/// Returns true when the guest was edited so the list can refresh.
+Future<bool> showGuestDetailsSheet(
+  BuildContext context,
+  Customer customer,
+) async {
+  bool edited = false;
+
+  Widget photoBox(String title, String photoData) {
+    final bytes = hotelPhotoBytes(photoData);
+
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 110,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: CustomColors.background,
+              border: Border.all(color: CustomColors.border),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: bytes == null
+                ? const Center(
+                    child: Icon(
+                      Icons.image_not_supported_outlined,
+                      color: CustomColors.muted,
+                    ),
+                  )
+                : Image.memory(bytes, fit: BoxFit.cover),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            bytes == null ? "$title · not added" : title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 10, color: CustomColors.muted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  await showCustomBottomSheet(
+    context: context,
+    builder: (BuildContext sheetContext) {
+      return StatefulBuilder(
+        builder: (BuildContext context, StateSetter updateSheet) {
+          final String name = customer.guestName.trim();
+
+          return CustomDialog(
+            icon: CircleAvatar(
+              radius: 20,
+              backgroundColor: CustomColors.neutralTint,
+              foregroundColor: CustomColors.text,
+              child: Text(
+                name.isEmpty ? "?" : name[0].toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            title: CustomSheetTitle(
+              name.isEmpty ? "Guest" : name,
+              subtitle: customer.mobile,
+            ),
+            content: SizedBox(
+              width: 620,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  CustomDetailCard(
+                    children: [
+                      CustomDetailRow("Mobile number", customer.mobile),
+                      CustomDetailRow("ID type", customer.idType),
+                      CustomDetailRow("ID number", customer.idNumber),
+                      if (customer.address.isNotEmpty)
+                        CustomDetailRow("Address", customer.address),
+                    ],
+                  ),
+                  const CustomSectionTitle("ID photos"),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      photoBox("ID front", customer.idFrontPhotoPath),
+                      const SizedBox(width: 10),
+                      photoBox("ID back", customer.idBackPhotoPath),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const CustomIconBadge(Icons.history_rounded),
+                    title: const Text("Stay history"),
+                    subtitle: Text(
+                      "${customer.stayHistory.length} ${customer.stayHistory.length == 1 ? "stay" : "stays"}",
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: CustomColors.muted,
+                      ),
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () =>
+                        showCustomerStayHistoryDialog(sheetContext, customer),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              CustomButton.outlineIcon(
+                onPressed: () => printCustomerId(customer),
+                icon: const Icon(Icons.print_outlined, size: 18),
+                label: const Text("Print ID"),
+              ),
+              CustomButton.icon(
+                onPressed: () async {
+                  final bool? result = await showEditCustomerDialog(
+                    sheetContext,
+                    customer,
+                  );
+                  if (result == true) {
+                    edited = true;
+                    updateSheet(() {});
+                  }
+                },
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text("Edit"),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+
+  return edited;
+}
+
 Future<void> showCustomerListDialog(BuildContext context) async {
   final searchController = TextEditingController();
 
   List<Customer> filteredCustomers = List<Customer>.from(
     CustomerStore.customers,
   );
-
-  Uint8List? photoBytes(String photoData) => hotelPhotoBytes(photoData);
 
   await showCustomBottomSheet(
     context: context,
@@ -714,285 +865,137 @@ Future<void> showCustomerListDialog(BuildContext context) async {
               }
 
               filteredCustomers = CustomerStore.customers.where((customer) {
-                return customer.customerId.toLowerCase().contains(search) ||
+                return customer.idNumber.toLowerCase().contains(search) ||
                     customer.mobile.toLowerCase().contains(search) ||
                     customer.guestName.toLowerCase().contains(search);
               }).toList();
             });
           }
 
-          Widget photoBox(String title, String photoData) {
-            final bytes = photoBytes(photoData);
+          Widget guestTile(Customer customer) {
+            final String name = customer.guestName.trim();
 
-            return Expanded(
-              child: Container(
-                height: 120,
-                decoration: BoxDecoration(
-                  border: Border.all(color: CustomColors.border),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: bytes == null
-                    ? Center(
+            return CustomSurface(
+              padding: EdgeInsets.zero,
+              child: InkWell(
+                onTap: () async {
+                  final bool edited = await showGuestDetailsSheet(
+                    dialogContext,
+                    customer,
+                  );
+                  if (edited) {
+                    searchCustomer(searchController.text);
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: CustomColors.neutralTint,
+                        foregroundColor: CustomColors.text,
                         child: Text(
-                          "$title\nNot Available",
-                          textAlign: TextAlign.center,
+                          name.isEmpty ? "?" : name[0].toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      )
-                    : Column(
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.all(4),
-                            child: Text(
-                              title,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name.isEmpty ? "Guest" : name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ),
-                          Expanded(
-                            child: Image.memory(bytes, fit: BoxFit.contain),
-                          ),
-                        ],
+                            Text(
+                              customer.idNumber.isEmpty
+                                  ? "ID not added"
+                                  : "ID ${customer.idNumber}",
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: CustomColors.muted,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: CustomColors.muted,
+                      ),
+                    ],
+                  ),
+                ),
               ),
             );
           }
 
           return CustomDialog(
-            title: const Text("Customer list / search"),
+            icon: const CustomIconBadge(Icons.people_outline_rounded),
+            title: CustomSheetTitle(
+              "Guests",
+              subtitle: searchController.text.trim().isEmpty
+                  ? "${CustomerStore.customers.length} saved"
+                  : "${filteredCustomers.length} of ${CustomerStore.customers.length} match",
+            ),
             content: SizedBox(
               width: 850,
-              height: 600,
               child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   CustomTextField(
                     controller: searchController,
                     autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: "Search Customer ID / Mobile / Guest Name",
-                      prefixIcon: Icon(Icons.search_rounded),
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText: "Search name, mobile or ID number",
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      suffixIcon: searchController.text.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: "Clear search",
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                              onPressed: () {
+                                searchController.clear();
+                                searchCustomer("");
+                              },
+                            ),
                     ),
                     onChanged: searchCustomer,
                   ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: filteredCustomers.isEmpty
-                        ? const Center(child: Text("No Customer Found"))
-                        : ListView.builder(
-                            itemCount: filteredCustomers.length,
-                            itemBuilder: (BuildContext context, int index) {
-                              final customer = filteredCustomers[index];
-
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 10),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        customer.customerId,
-                                        style: const TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 5),
-                                      Text(
-                                        "Guest Name : "
-                                        "${customer.guestName}",
-                                      ),
-                                      Text(
-                                        "Mobile Number : "
-                                        "${customer.mobile}",
-                                      ),
-                                      Text(
-                                        "ID Type : "
-                                        "${customer.idType}",
-                                      ),
-                                      Text(
-                                        "ID Number : "
-                                        "${customer.idNumber}",
-                                      ),
-                                      if (customer.address.isNotEmpty)
-                                        Text("Address : ${customer.address}"),
-                                      const SizedBox(height: 10),
-                                      Row(
-                                        children: [
-                                          photoBox(
-                                            "ID FRONT PHOTO",
-                                            customer.idFrontPhotoPath,
-                                          ),
-                                          const SizedBox(width: 12),
-                                          photoBox(
-                                            "ID BACK PHOTO",
-                                            customer.idBackPhotoPath,
-                                          ),
-                                        ],
-                                      ),
-
-                                      const SizedBox(height: 10),
-
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: SizedBox(
-                                              height: 64,
-                                              child: CustomButton(
-                                                onPressed: () async {
-                                                  final bool? edited =
-                                                      await showEditCustomerDialog(
-                                                        dialogContext,
-                                                        customer,
-                                                      );
-
-                                                  if (edited == true) {
-                                                    updateDialog(() {
-                                                      filteredCustomers =
-                                                          List<Customer>.from(
-                                                            CustomerStore
-                                                                .customers,
-                                                          );
-                                                    });
-                                                  }
-                                                },
-                                                style: ElevatedButton.styleFrom(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 4,
-                                                        vertical: 4,
-                                                      ),
-                                                ),
-                                                child: const Column(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.edit_rounded,
-                                                      size: 16,
-                                                    ),
-                                                    SizedBox(height: 2),
-                                                    Text(
-                                                      "EDIT\nCUSTOMER",
-                                                      textAlign:
-                                                          TextAlign.center,
-                                                      maxLines: 2,
-                                                      style: TextStyle(
-                                                        fontSize: 9,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        height: 1.1,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: SizedBox(
-                                              height: 64,
-                                              child: CustomButton(
-                                                onPressed: () async {
-                                                  await printCustomerId(
-                                                    customer,
-                                                  );
-                                                },
-                                                style: ElevatedButton.styleFrom(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 4,
-                                                        vertical: 4,
-                                                      ),
-                                                ),
-                                                child: const Column(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.print_rounded,
-                                                      size: 16,
-                                                    ),
-                                                    SizedBox(height: 2),
-                                                    Text(
-                                                      "PRINT\nCUSTOMER ID",
-                                                      textAlign:
-                                                          TextAlign.center,
-                                                      maxLines: 2,
-                                                      style: TextStyle(
-                                                        fontSize: 9,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        height: 1.1,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: SizedBox(
-                                              height: 64,
-                                              child: CustomButton(
-                                                onPressed: () async {
-                                                  await showCustomerStayHistoryDialog(
-                                                    dialogContext,
-                                                    customer,
-                                                  );
-                                                },
-                                                style: ElevatedButton.styleFrom(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 4,
-                                                        vertical: 4,
-                                                      ),
-                                                ),
-                                                child: Column(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  children: [
-                                                    const Icon(
-                                                      Icons.history_rounded,
-                                                      size: 16,
-                                                    ),
-                                                    const SizedBox(height: 2),
-                                                    Text(
-                                                      "VIEW STAY\nHISTORY (${customer.stayHistory.length})",
-                                                      textAlign:
-                                                          TextAlign.center,
-                                                      maxLines: 2,
-                                                      style: const TextStyle(
-                                                        fontSize: 9,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        height: 1.1,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                  ),
+                  if (filteredCustomers.isEmpty)
+                    CustomEmptyState(
+                      title: CustomerStore.customers.isEmpty
+                          ? "No guests yet"
+                          : "No match",
+                      message: CustomerStore.customers.isEmpty
+                          ? "Guests are saved automatically when you book a room."
+                          : "Try a different name, mobile or ID number.",
+                      icon: Icons.person_search_rounded,
+                    )
+                  else
+                    for (final customer in filteredCustomers)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: guestTile(customer),
+                      ),
                 ],
               ),
             ),
             actions: [
               CustomButton.text(
-                autofocus: true,
                 onPressed: () {
                   Navigator.pop(dialogContext);
                 },

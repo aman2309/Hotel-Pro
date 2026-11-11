@@ -1,4 +1,5 @@
 import '../widgets/live_stay_duration.dart';
+import '../widgets/future_booking_badge.dart';
 import '../widgets/custom_bottom_sheet.dart';
 import '../widgets/custom_dropdown.dart';
 import '../theme/custom_colors.dart';
@@ -619,6 +620,8 @@ Future<String?> showRoomControlDialog(BuildContext context, Room room) {
                     ),
 
                     if (room.futureBooking) ...[
+                      const SizedBox(height: 12),
+                      FutureBookingBadge(room),
                       const SizedBox(height: 8),
                       SizedBox(
                         width: double.infinity,

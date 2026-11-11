@@ -77,6 +77,7 @@ class _LicenseScreenState extends State<LicenseScreen> {
               HotelMembershipCard(
                 view: license.cloudView,
                 daysLeft: license.daysLeft,
+                planLabel: license.planLabel,
                 endsAt:
                     license.expiresAt ??
                     license.trialEndsAt ??

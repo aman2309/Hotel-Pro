@@ -31,7 +31,8 @@ async function setHotelEnabled(db, actor, id, enabled) {
   const ref = db.doc(`businesses/${id}`), audit = db.collection('adminAuditLogs').doc();
   await db.runTransaction(async tx => {
     const hotel = await tx.get(ref);
-    if (!hotel.exists) throw Error('HOTEL_NOT_FOUND');
+    if (!hotel.exists || hotel.get('deletedAt')) throw Error('HOTEL_NOT_FOUND');
+    if (hotel.get('deletingAt')) throw Error('HOTEL_DELETION_IN_PROGRESS');
     tx.update(ref, {enabled, updatedAt: FieldValue.serverTimestamp()});
     tx.create(audit, {actorUid: actor.uid, hotelId: id, action: enabled ? 'hotel-resumed' : 'hotel-suspended',
       previousEnabled: hotel.data().enabled !== false, enabled, createdAt: FieldValue.serverTimestamp()});

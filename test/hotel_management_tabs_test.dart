@@ -137,45 +137,49 @@ void main() {
     },
   );
   for (final size in [const Size(320, 640), const Size(740, 360)]) {
-    testWidgets('Settings is embedded and keeps its draft at $size', (
+    testWidgets('Settings opens hotel information from a button at $size', (
       tester,
     ) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
+      String? picked;
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.light,
           home: HotelDashboardView(
             hotelName: 'Hotel Pro',
             rooms: const [],
-            onAction: (_) {},
+            onAction: (action) => picked = action,
             onOpenRoom: (_) {},
             onRefresh: () async {},
           ),
         ),
       );
-      await tester.tap(find.text('Settings'));
-      await tester.pumpAndSettle();
-      expect(find.byType(HotelSettingsForm), findsOneWidget);
-      expect(find.byType(BottomSheet), findsNothing);
-      final name = find.widgetWithText(TextFormField, 'Hotel Name');
-      await tester.ensureVisible(name);
-      await tester.enterText(name, 'My new hotel');
-      await tester.tap(find.text('Home'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Settings'));
-      await tester.pumpAndSettle();
-      expect(
-        tester.widget<TextFormField>(name).controller!.text,
-        'My new hotel',
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Settings'),
+        ),
       );
+      await tester.pumpAndSettle();
+      expect(find.byType(HotelSettingsForm), findsNothing);
+      for (final tool in ['Guests', 'Expenses', 'Contact us', 'Sign out']) {
+        await tester.scrollUntilVisible(
+          find.text(tool),
+          120,
+          scrollable: find.byType(Scrollable).first,
+        );
+      }
       await tester.scrollUntilVisible(
-        find.text('Save settings'),
-        180,
+        find.text('Edit hotel information'),
+        -120,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.tap(find.text('Edit hotel information'));
+      await tester.pump();
+      expect(picked, 'settings');
       expect(tester.takeException(), isNull);
     });
   }

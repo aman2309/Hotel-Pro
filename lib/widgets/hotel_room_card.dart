@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/room.dart';
 import '../theme/custom_colors.dart';
+import 'future_booking_badge.dart';
 import 'live_stay_duration.dart';
 
 class HotelRoomCard extends StatelessWidget {
@@ -9,12 +10,10 @@ class HotelRoomCard extends StatelessWidget {
     required this.room,
     required this.onTap,
     required this.timeLabel,
-    this.futureLabel,
   });
   final Room room;
   final VoidCallback onTap;
   final String timeLabel;
-  final String? futureLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +53,7 @@ class HotelRoomCard extends StatelessWidget {
           label,
           room.roomType,
           if (timeLabel.isNotEmpty) timeLabel,
-          if (futureLabel != null) 'Upcoming: $futureLabel',
+          ?futureBookingLabel(room, withYear: true),
         ].join(' · '),
         child: Material(
           color: tint,
@@ -79,12 +78,6 @@ class HotelRoomCard extends StatelessWidget {
                           children: [
                             Icon(icon, size: 18, color: color),
                             const Spacer(),
-                            if (futureLabel != null)
-                              Icon(
-                                Icons.event_available_rounded,
-                                size: 15,
-                                color: color,
-                              ),
                           ],
                         ),
                         const SizedBox(height: 5),
@@ -134,6 +127,10 @@ class HotelRoomCard extends StatelessWidget {
                             color: CustomColors.text,
                           ),
                         ),
+                        if (futureBookingLabel(room) != null) ...[
+                          const SizedBox(height: 4),
+                          FutureBookingBadge(room, compact: true),
+                        ],
                       ],
                     ),
                   ),

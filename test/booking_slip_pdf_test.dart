@@ -159,8 +159,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Room Rent'), findsNothing);
       expect(find.textContaining('987654'), findsNothing);
-      await tester.ensureVisible(find.text('Print view'));
-      await tester.tap(find.text('Print view'));
+      await tester.ensureVisible(find.text('Preview'));
+      await tester.tap(find.text('Preview'));
       await tester.pumpAndSettle();
       expect(find.text('Room 101 Booking Slip'), findsOneWidget);
       expect(

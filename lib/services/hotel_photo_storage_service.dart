@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -122,6 +123,24 @@ class HotelPhotoStorageService extends ChangeNotifier {
     _retryTimer ??= Timer.periodic(const Duration(seconds: 45), (_) {
       unawaited(syncPending(reason: 'timer'));
     });
+  }
+
+  /// Whether [base64] on this device is the photo behind the cloud record:
+  /// either the downloaded Storage bytes ([sha]) or the original this device
+  /// uploaded to [storagePath] (Storage holds a compressed copy, so its sha
+  /// differs from the local original).
+  Future<bool> isLocalCopyOf(
+    String base64, {
+    Object? sha,
+    Object? storagePath,
+  }) async {
+    final String? localSha = sha256OfBase64(base64);
+    if (localSha == null) return false;
+    if (sha is String && localSha == sha) return true;
+    final String path = (storagePath ?? '').toString().trim();
+    if (path.isEmpty) return false;
+    await _loadIndex();
+    return _pathIndex[path] == localSha;
   }
 
   Future<Map<String, String>> photoStoragePaths() async {
@@ -927,10 +946,18 @@ class HotelPhotoStorageService extends ChangeNotifier {
         if (!HotelPhotoRef.looksLikePhotoBytes(guest.idFrontPhotoPath) &&
             (doc?['hasFrontPhoto'] == true ||
                 _pathFromDoc(doc ?? {}, front: true) != null)) {
-          final String frontPath =
-              (doc == null ? null : _pathFromDoc(doc, front: true)) ??
-              HotelPhotoPaths.front(businessId, guest.customerId);
-          final String? front = await _downloadBase64(frontPath);
+          final String? docFrontPath = doc == null
+              ? null
+              : _pathFromDoc(doc, front: true);
+          // A doc path is authoritative. Without one the photo is either a
+          // legacy canonical upload or its Storage metadata has not landed
+          // yet (records commit before photos); a 404 on that guess is a
+          // pending upload, not a restore failure. photoVersion changes
+          // once the metadata lands and this restore re-runs.
+          final String? front = await _downloadBase64(
+            docFrontPath ?? HotelPhotoPaths.front(businessId, guest.customerId),
+            missingIsFailure: docFrontPath != null,
+          );
           if (front != null) {
             guest.idFrontPhotoPath = front;
             guestsChanged = true;
@@ -939,10 +966,13 @@ class HotelPhotoStorageService extends ChangeNotifier {
         if (!HotelPhotoRef.looksLikePhotoBytes(guest.idBackPhotoPath) &&
             (doc?['hasBackPhoto'] == true ||
                 _pathFromDoc(doc ?? {}, front: false) != null)) {
-          final String backPath =
-              (doc == null ? null : _pathFromDoc(doc, front: false)) ??
-              HotelPhotoPaths.back(businessId, guest.customerId);
-          final String? back = await _downloadBase64(backPath);
+          final String? docBackPath = doc == null
+              ? null
+              : _pathFromDoc(doc, front: false);
+          final String? back = await _downloadBase64(
+            docBackPath ?? HotelPhotoPaths.back(businessId, guest.customerId),
+            missingIsFailure: docBackPath != null,
+          );
           if (back != null) {
             guest.idBackPhotoPath = back;
             guestsChanged = true;
@@ -1038,16 +1068,29 @@ class HotelPhotoStorageService extends ChangeNotifier {
         idNumber: idNumber,
         customerId: linked?.customerId,
       );
+      final String? frontDocPath = _additionalDocPath(
+        primaryDoc,
+        additionalId,
+        front: true,
+      );
+      final String? backDocPath = _additionalDocPath(
+        primaryDoc,
+        additionalId,
+        front: false,
+      );
       if (await _fillExtraSide(
         extra: extra,
         key: 'idFrontPhoto',
         altKey: 'frontPhoto',
         fromCustomer: linked?.idFrontPhotoPath ?? '',
-        storagePath: HotelPhotoPaths.additionalFront(
-          businessId,
-          primaryGuestId,
-          additionalId,
-        ),
+        storagePath:
+            frontDocPath ??
+            HotelPhotoPaths.additionalFront(
+              businessId,
+              primaryGuestId,
+              additionalId,
+            ),
+        pathFromDoc: frontDocPath != null,
         wantsDownload: _additionalWantsPhoto(
           primaryDoc,
           additionalId,
@@ -1061,11 +1104,14 @@ class HotelPhotoStorageService extends ChangeNotifier {
         key: 'idBackPhoto',
         altKey: 'backPhoto',
         fromCustomer: linked?.idBackPhotoPath ?? '',
-        storagePath: HotelPhotoPaths.additionalBack(
-          businessId,
-          primaryGuestId,
-          additionalId,
-        ),
+        storagePath:
+            backDocPath ??
+            HotelPhotoPaths.additionalBack(
+              businessId,
+              primaryGuestId,
+              additionalId,
+            ),
+        pathFromDoc: backDocPath != null,
         wantsDownload: _additionalWantsPhoto(
           primaryDoc,
           additionalId,
@@ -1084,6 +1130,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
     required String altKey,
     required String fromCustomer,
     required String storagePath,
+    required bool pathFromDoc,
     required bool wantsDownload,
   }) async {
     final String current = (extra[key] ?? extra[altKey] ?? '').toString();
@@ -1099,13 +1146,39 @@ class HotelPhotoStorageService extends ChangeNotifier {
     if (!wantsDownload) {
       return false;
     }
-    final String? downloaded = await _downloadBase64(storagePath);
+    // Same rule as the primary guest: only a doc-reported path is
+    // authoritative; the legacy path is a guess that may 404 while the
+    // upload metadata has not landed yet.
+    final String? downloaded = await _downloadBase64(
+      storagePath,
+      missingIsFailure: pathFromDoc,
+    );
     if (downloaded == null) {
       return false;
     }
     extra[key] = downloaded;
     extra[altKey] = downloaded;
     return true;
+  }
+
+  /// The content-versioned Storage path this guest doc recorded, if any.
+  String? _additionalDocPath(
+    Map<String, dynamic>? doc,
+    String additionalId, {
+    required bool front,
+  }) {
+    final dynamic nested = doc?['additionalPhotos'];
+    if (nested is Map) {
+      final dynamic item = nested[additionalId];
+      if (item is Map) {
+        final String path =
+            (item[front ? 'idFrontStoragePath' : 'idBackStoragePath'] ?? '')
+                .toString()
+                .trim();
+        if (path.isNotEmpty) return path;
+      }
+    }
+    return null;
   }
 
   bool _additionalWantsPhoto(
@@ -1192,7 +1265,10 @@ class HotelPhotoStorageService extends ChangeNotifier {
     return null;
   }
 
-  Future<String?> _downloadBase64(String? path) async {
+  Future<String?> _downloadBase64(
+    String? path, {
+    bool missingIsFailure = true,
+  }) async {
     if (path == null || path.isEmpty || !isAvailable) {
       if ((path ?? '').isNotEmpty && !isAvailable) {
         debugPrint(
@@ -1209,11 +1285,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
     debugPrint('[PHOTO_RESTORE] storage path=$path');
     try {
       final Uint8List bytes =
-          await FirebaseStorage.instance
-              .ref(path)
-              .getData(HotelPhotoRef.maxBytes)
-              .timeout(_timeout) ??
-          Uint8List(0);
+          await _fetchStorageBytes(path).timeout(_timeout) ?? Uint8List(0);
       if (bytes.isEmpty) {
         debugPrint('[PHOTO_RESTORE] download failure path=$path reason=empty');
         return null;
@@ -1225,12 +1297,30 @@ class HotelPhotoStorageService extends ChangeNotifier {
       );
       return base64Encode(bytes);
     } catch (error) {
-      hasRestoreFailures = true;
-      lastPhotoError = error.toString();
+      if (missingIsFailure) {
+        hasRestoreFailures = true;
+        lastPhotoError = error.toString();
+      }
       debugPrint('[PHOTO_RESTORE] download failure path=$path reason=$error');
       _log('Download skipped $path: $error');
       return null;
     }
+  }
+
+  /// Phones read Storage directly. Browsers cannot without a bucket CORS
+  /// rule, so the web app asks the `getGuestPhoto` Cloud Function, which
+  /// checks the same owner rule as storage.rules and returns the bytes.
+  Future<Uint8List?> _fetchStorageBytes(String path) async {
+    if (!kIsWeb) {
+      return FirebaseStorage.instance.ref(path).getData(HotelPhotoRef.maxBytes);
+    }
+    final HttpsCallableResult<dynamic> result =
+        await FirebaseFunctions.instanceFor(
+          region: 'asia-south1',
+        ).httpsCallable('getGuestPhoto').call(<String, dynamic>{'path': path});
+    final dynamic data = result.data;
+    final String encoded = data is Map ? (data['base64'] ?? '').toString() : '';
+    return encoded.isEmpty ? null : base64Decode(encoded);
   }
 
   static String? sha256OfBase64(String raw) {

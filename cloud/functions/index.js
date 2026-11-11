@@ -85,6 +85,16 @@ function adminCall(handler, secret = false) {
     catch(error){throw callableError(error);}
   });
 }
+const {deleteHotel} = require('./admin_delete_hotel');
+const {getStorage} = require('firebase-admin/storage');
+exports.adminDeleteHotel = onCall({region: 'asia-south1', maxInstances: 5, timeoutSeconds: 540}, async request => {
+  try {
+    return await deleteHotel(getFirestore(), adminActor(request), request.data, prefix =>
+      getStorage().bucket('yankees-hotel-pro.firebasestorage.app').deleteFiles({prefix, force: true}));
+  } catch (error) {
+    throw callableError(error);
+  }
+});
 exports.adminListHotelsV2=adminCall(adminData.listHotels);
 exports.adminHotelDetails=adminCall(adminData.hotelDetails);
 exports.adminHotelRecords=adminCall(adminData.records);
@@ -92,6 +102,7 @@ exports.adminAuditLog=adminCall(adminData.audit);
 exports.adminIssueLicenseKey=adminCall(keys.issueKey,true);
 exports.adminListLicenseKeys=adminCall(keys.listKeys);
 exports.adminRevokeLicenseKey=adminCall((db,actor,input)=>keys.revokeKey(db,actor,input.keyId));
+exports.adminLicenseRevenue=adminCall((db,actor,input)=>keys.revenue(db,actor,input));
 exports.redeemHotelLicenseKey=onCall({region:'asia-south1',secrets:[pinSecret],maxInstances:5},async request=>{
   const {uid,phone}=caller(request);
   try {
@@ -100,4 +111,18 @@ exports.redeemHotelLicenseKey=onCall({region:'asia-south1',secrets:[pinSecret],m
       result.error==='rate-limited'?'Too many attempts. Try again in 15 minutes.':'This key is invalid, already used, revoked, or assigned to another hotel.');
     return result;
   } catch(error) {throw callableError(error);}
+});
+
+// Guest ID photos for the web app (avoids needing a Storage bucket CORS rule).
+const guestPhoto = require('./guest_photo');
+exports.getGuestPhoto = onCall({region: 'asia-south1', maxInstances: 10, memory: '512MiB'}, async request => {
+  const result = await guestPhoto.readGuestPhoto({
+    db: getFirestore(),
+    bucket: getStorage().bucket('yankees-hotel-pro.firebasestorage.app'),
+    uid: request.auth?.uid,
+    isAdmin: request.auth?.token?.admin === true,
+    path: request.data?.path,
+  });
+  if (result.error) throw new HttpsError(result.error, 'Photo is not available');
+  return result;
 });

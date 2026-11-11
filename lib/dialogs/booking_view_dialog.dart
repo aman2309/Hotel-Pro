@@ -1,18 +1,17 @@
 import '../widgets/live_stay_duration.dart';
 import '../widgets/custom_bottom_sheet.dart';
 import '../theme/custom_colors.dart';
-import '../widgets/custom_button.dart';
-import '../widgets/custom_dialog.dart';
+import '../widgets/hotel_ui.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:printing/printing.dart';
 import '../widgets/app_toast.dart';
 
 import '../models/customer.dart';
 import '../models/room.dart';
 import '../stores/customer_store.dart';
 import 'booking_slip_dialog.dart';
+import '../services/document_output.dart';
 
 Future<void> showBookingViewDialog(
   BuildContext context,
@@ -139,8 +138,8 @@ Future<void> showBookingViewDialog(
                           photoContext,
                           () async {
                             final pdf = await buildGuestPhotoPdf(title, bytes);
-                            await Printing.sharePdf(
-                              bytes: pdf,
+                            await DocumentOutput.sharePdf(
+                              pdf,
                               filename: 'Guest-ID-Photo.pdf',
                             );
                           },
@@ -153,8 +152,8 @@ Future<void> showBookingViewDialog(
                           photoContext,
                           () async {
                             final pdf = await buildGuestPhotoPdf(title, bytes);
-                            await Printing.layoutPdf(
-                              onLayout: (_) async => pdf,
+                            await DocumentOutput.printPdf(
+                              pdf,
                               name: 'Guest-ID-Photo',
                             );
                           },
@@ -188,48 +187,14 @@ Future<void> showBookingViewDialog(
     );
   }
 
-  Widget bookingDetail(String title, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final label = Text(
-            title,
-            style: const TextStyle(fontSize: 12, color: CustomColors.muted),
-          );
-          final detail = Text(
-            value.isEmpty ? '-' : value,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: CustomColors.text,
-            ),
-          );
-          if (constraints.maxWidth < 420) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [label, const SizedBox(height: 4), detail],
-            );
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(width: 150, child: label),
-              Expanded(child: detail),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   Widget photoBox(
     BuildContext dialogContext,
     String title,
     String photoData,
     String mobile,
-    bool front,
-  ) {
+    bool front, {
+    String? caption,
+  }) {
     return Expanded(
       child: FutureBuilder<Uint8List?>(
         future: resolveBookingPhoto(photoData, mobile, front),
@@ -240,13 +205,14 @@ Future<void> showBookingViewDialog(
             onTap: loading
                 ? null
                 : () => openLargePhoto(dialogContext, title, bytes),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             child: Container(
               height: 150,
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
+                color: CustomColors.background,
                 border: Border.all(color: CustomColors.border),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: Column(
                 children: [
@@ -260,6 +226,10 @@ Future<void> showBookingViewDialog(
                                   ? 'Could not load photo'
                                   : 'Photo not available',
                               textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: CustomColors.muted,
+                              ),
                             ),
                           )
                         : Image.memory(
@@ -273,11 +243,11 @@ Future<void> showBookingViewDialog(
                   Padding(
                     padding: const EdgeInsets.all(8),
                     child: Text(
-                      '$title · Tap to view',
+                      '${caption ?? title} · tap to view',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 10,
-                        fontWeight: FontWeight.w600,
+                        color: CustomColors.muted,
                       ),
                     ),
                   ),
@@ -294,222 +264,268 @@ Future<void> showBookingViewDialog(
     context: context,
     builder: (BuildContext dialogContext) {
       return CustomDialog(
-        title: Text(
-          isFuture
-              ? "Future Booking - Room ${room.roomNumber}"
-              : "Booking Details - Room ${room.roomNumber}",
+        icon: CustomIconBadge(
+          isFuture ? Icons.event_rounded : Icons.hotel_rounded,
+          color: isFuture ? CustomColors.button : CustomColors.booked,
+        ),
+        title: CustomSheetTitle(
+          "Room ${room.roomNumber} · ${guestName.isEmpty ? "Guest" : guestName}",
+          subtitle: isFuture
+              ? "Future booking · ${room.roomType}"
+              : "Current booking · ${room.roomType}",
         ),
         content: SizedBox(
           width: 620,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: isFuture
-                        ? CustomColors.neutralTint
-                        : CustomColors.bookedTint,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    isFuture ? "● FUTURE BOOKING" : "● CURRENT BOOKING",
-                    style: TextStyle(
-                      color: isFuture
-                          ? CustomColors.primary
-                          : CustomColors.error,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: isFuture
+                      ? CustomColors.neutralTint
+                      : CustomColors.bookedTint,
+                  borderRadius: BorderRadius.circular(18),
                 ),
-
-                const SizedBox(height: 15),
-
-                bookingDetail("Guest Name", guestName),
-
-                bookingDetail("Mobile Number", guestMobile),
-
-                bookingDetail("ID Number", guestIdNumber),
-
-                if (guestAddress.isNotEmpty)
-                  bookingDetail("Address", guestAddress),
-
-                bookingDetail("Room Number", room.roomNumber.toString()),
-
-                bookingDetail("Room Type", room.roomType),
-
-                bookingDetail(
-                  'Check-in date',
-                  formatDate(
-                    isFuture
-                        ? room.futureBookingDate
-                        : room.bookingTime ?? bookingDate,
-                  ),
-                ),
-                bookingDetail(
-                  'Check-in time',
-                  formatTime(
-                    isFuture ? room.futureBookingDate : room.bookingTime,
-                  ),
-                ),
-                bookingDetail(
-                  'Check-out date',
-                  formatDate(
-                    isFuture ? room.futureBookingEnd : room.bookingEndTime,
-                  ),
-                ),
-                bookingDetail(
-                  'Check-out time',
-                  formatTime(
-                    isFuture ? room.futureBookingEnd : room.bookingEndTime,
-                  ),
-                ),
-
-                if (!isFuture)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Stay Duration',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: CustomColors.muted,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        LiveStayDuration(
-                          start: room.bookingTime,
-                          checkout: room.checkoutTime,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                bookingDetail("Number of Days", bookingDays.toString()),
-
-                bookingDetail("Advance", "₹$bookingAdvance"),
-
-                bookingDetail(
-                  "Payment Mode",
-                  bookingPaymentMode.isEmpty ? "-" : bookingPaymentMode,
-                ),
-
-                const Divider(),
-
-                const Text(
-                  "Guest ID Photos",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-
-                const SizedBox(height: 10),
-
-                Row(
+                child: Row(
                   children: [
-                    photoBox(
-                      dialogContext,
-                      "ID FRONT PHOTO",
-                      idFrontPhoto,
-                      guestMobile,
-                      true,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "Check-in",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: CustomColors.muted,
+                            ),
+                          ),
+                          Text(
+                            formatDate(
+                              isFuture
+                                  ? room.futureBookingDate
+                                  : room.bookingTime ?? bookingDate,
+                            ),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            formatTime(
+                              isFuture
+                                  ? room.futureBookingDate
+                                  : room.bookingTime,
+                            ),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: CustomColors.muted,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(width: 12),
-                    photoBox(
-                      dialogContext,
-                      "ID BACK PHOTO",
-                      idBackPhoto,
-                      guestMobile,
-                      false,
+                    Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 18,
+                      color: isFuture
+                          ? CustomColors.muted
+                          : CustomColors.booked,
+                    ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          const Text(
+                            "Check-out",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: CustomColors.muted,
+                            ),
+                          ),
+                          Text(
+                            formatDate(
+                              isFuture
+                                  ? room.futureBookingEnd
+                                  : room.bookingEndTime,
+                            ),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            formatTime(
+                              isFuture
+                                  ? room.futureBookingEnd
+                                  : room.bookingEndTime,
+                            ),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: CustomColors.muted,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-
-                const Divider(),
-
-                if ((showFutureBooking
+              ),
+              if (!isFuture) ...[
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.timer_outlined,
+                      size: 16,
+                      color: CustomColors.muted,
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      "Staying for ",
+                      style: TextStyle(fontSize: 12, color: CustomColors.muted),
+                    ),
+                    LiveStayDuration(
+                      start: room.bookingTime,
+                      checkout: room.checkoutTime,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const CustomSectionTitle("Guest"),
+              CustomDetailCard(
+                children: [
+                  CustomDetailRow("Guest name", guestName),
+                  CustomDetailRow("Mobile number", guestMobile),
+                  CustomDetailRow("ID number", guestIdNumber),
+                  if (guestAddress.isNotEmpty)
+                    CustomDetailRow("Address", guestAddress),
+                ],
+              ),
+              const CustomSectionTitle("Room & payment"),
+              CustomDetailCard(
+                children: [
+                  CustomDetailRow(
+                    "Room",
+                    "${room.roomNumber} · ${room.roomType}",
+                  ),
+                  CustomDetailRow("Number of days", bookingDays.toString()),
+                  CustomDetailRow("Advance", "₹$bookingAdvance"),
+                  CustomDetailRow(
+                    "Payment mode",
+                    bookingPaymentMode.isEmpty ? "-" : bookingPaymentMode,
+                  ),
+                ],
+              ),
+              const CustomSectionTitle("Guest ID photos"),
+              Row(
+                children: [
+                  photoBox(
+                    dialogContext,
+                    "ID FRONT PHOTO",
+                    idFrontPhoto,
+                    guestMobile,
+                    true,
+                    caption: "ID front",
+                  ),
+                  const SizedBox(width: 10),
+                  photoBox(
+                    dialogContext,
+                    "ID BACK PHOTO",
+                    idBackPhoto,
+                    guestMobile,
+                    false,
+                    caption: "ID back",
+                  ),
+                ],
+              ),
+              if ((showFutureBooking
+                      ? room.futureExtraGuests
+                      : room.extraGuests)
+                  .isNotEmpty) ...[
+                const CustomSectionTitle("Additional guests"),
+                ...(showFutureBooking
                         ? room.futureExtraGuests
                         : room.extraGuests)
-                    .isNotEmpty) ...[
-                  const Text(
-                    "Additional guests",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
+                    .asMap()
+                    .entries
+                    .map((entry) {
+                      final index = entry.key;
+                      final guest = entry.value;
 
-                  const SizedBox(height: 8),
+                      final String extraMobile =
+                          guest["mobile"]?.toString() ?? "";
 
-                  ...(showFutureBooking
-                          ? room.futureExtraGuests
-                          : room.extraGuests)
-                      .asMap()
-                      .entries
-                      .map((entry) {
-                        final index = entry.key;
-                        final guest = entry.value;
+                      final Customer? extraCustomer =
+                          CustomerStore.findByMobile(extraMobile);
 
-                        final String extraMobile =
-                            guest["mobile"]?.toString() ?? "";
+                      // Synced room docs carry an empty photo slot; fall
+                      // back to the guest record, which holds the bytes.
+                      final String extraFrontPhoto =
+                          (guest["idFrontPhoto"]?.toString() ?? "")
+                              .trim()
+                              .isNotEmpty
+                          ? guest["idFrontPhoto"].toString()
+                          : extraCustomer?.idFrontPhotoPath ?? "";
 
-                        final Customer? extraCustomer =
-                            CustomerStore.findByMobile(extraMobile);
+                      // Synced room docs carry an empty photo slot; fall
+                      // back to the guest record, which holds the bytes.
+                      final String extraBackPhoto =
+                          (guest["idBackPhoto"]?.toString() ?? "")
+                              .trim()
+                              .isNotEmpty
+                          ? guest["idBackPhoto"].toString()
+                          : extraCustomer?.idBackPhotoPath ?? "";
 
-                        final String extraCustomerId =
-                            extraCustomer?.customerId ?? "-";
-
-                        final String extraFrontPhoto =
-                            guest["idFrontPhoto"]?.toString() ??
-                            extraCustomer?.idFrontPhotoPath ??
-                            "";
-
-                        final String extraBackPhoto =
-                            guest["idBackPhoto"]?.toString() ??
-                            extraCustomer?.idBackPhotoPath ??
-                            "";
-
-                        return Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: CustomColors.border),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: CustomSurface(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Text(
-                                "GUEST ${index + 2}",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      "${guest["name"] ?? "Guest ${index + 2}"}",
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  CustomStatusBadge(
+                                    label: "Guest ${index + 2}",
+                                    color: CustomColors.primary,
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 6),
-                              Text("Customer ID : $extraCustomerId"),
-                              Text(
-                                "Guest Name : "
-                                "${guest["name"] ?? "-"}",
-                              ),
-                              Text(
-                                "Mobile Number : "
+                              const SizedBox(height: 4),
+                              CustomDetailRow(
+                                "Mobile number",
                                 "${guest["mobile"] ?? "-"}",
                               ),
-                              Text(
-                                "ID Number : "
+                              CustomDetailRow(
+                                "ID number",
                                 "${guest["idNumber"] ?? "-"}",
                               ),
                               if ((guest["address"] ?? "")
                                   .toString()
                                   .trim()
                                   .isNotEmpty)
-                                Text("Address : ${guest["address"]}"),
+                                CustomDetailRow(
+                                  "Address",
+                                  "${guest["address"]}",
+                                ),
                               const SizedBox(height: 10),
                               Row(
                                 children: [
@@ -519,36 +535,29 @@ Future<void> showBookingViewDialog(
                                     extraFrontPhoto,
                                     extraMobile,
                                     true,
+                                    caption: "ID front",
                                   ),
-                                  const SizedBox(width: 12),
+                                  const SizedBox(width: 10),
                                   photoBox(
                                     dialogContext,
                                     "GUEST ${index + 2} ID BACK PHOTO",
                                     extraBackPhoto,
                                     extraMobile,
                                     false,
+                                    caption: "ID back",
                                   ),
                                 ],
                               ),
                             ],
                           ),
-                        );
-                      }),
-
-                  const Divider(),
-                ],
+                        ),
+                      );
+                    }),
               ],
-            ),
+            ],
           ),
         ),
         actions: [
-          CustomButton.text(
-            autofocus: true,
-            onPressed: () {
-              Navigator.pop(dialogContext);
-            },
-            child: const Text("Close"),
-          ),
           CustomButton.outlineIcon(
             onPressed: () => showBookingSlipPrintView(
               dialogContext,
@@ -556,7 +565,7 @@ Future<void> showBookingViewDialog(
               showFutureBooking: isFuture,
             ),
             icon: const Icon(Icons.preview_rounded),
-            label: const Text("Print view"),
+            label: const Text("Preview"),
           ),
           CustomButton.outlineIcon(
             onPressed: () => runBookingDocumentAction(
@@ -564,7 +573,7 @@ Future<void> showBookingViewDialog(
               () => shareBookingSlip(room, showFutureBooking: isFuture),
             ),
             icon: const Icon(Icons.share_rounded),
-            label: const Text('Send PDF'),
+            label: const Text('Send'),
           ),
           CustomButton.icon(
             onPressed: () => runBookingDocumentAction(
