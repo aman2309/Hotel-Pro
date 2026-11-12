@@ -240,7 +240,7 @@ class _AdminLoginState extends State<AdminLogin> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.apartment_rounded, size: 48),
+                const Center(child: AppIcon(size: 48, radius: 12)),
                 const SizedBox(height: 20),
                 const Text(
                   'Hotel Pro',

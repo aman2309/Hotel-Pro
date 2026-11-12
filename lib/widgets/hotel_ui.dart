@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/custom_colors.dart';
+export 'app_icon.dart';
 export 'custom_button.dart';
 export 'custom_dialog.dart';
 export 'custom_text_field.dart';
