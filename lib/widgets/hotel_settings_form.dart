@@ -23,7 +23,7 @@ class _HotelSettingsFormState extends State<HotelSettingsForm> {
   final _gst = TextEditingController();
   final _tax = TextEditingController();
   final _password = TextEditingController();
-  bool _hide = true, _busy = false, _dirty = false;
+  bool _busy = false, _dirty = false;
   String? _error, _success;
   @override
   void initState() {
