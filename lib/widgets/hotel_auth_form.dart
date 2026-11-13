@@ -1,11 +1,11 @@
-import 'app_icon.dart';
-import 'custom_button.dart';
-import '../screens/hotel_signup_screen.dart';
 import 'package:flutter/material.dart';
 
+import '../screens/hotel_signup_screen.dart';
 import '../services/phone_auth_service.dart';
 import '../theme/custom_colors.dart';
 import '../utils/responsive_ui.dart';
+import 'app_icon.dart';
+import 'custom_button.dart';
 import 'phone_otp_form.dart';
 
 /// App login and signup: mobile number (+91) and OTP only.
@@ -54,9 +54,7 @@ class _HotelAuthFormState extends State<HotelAuthForm> {
                   alignment: Alignment.centerLeft,
                   child: IconButton(
                     tooltip: 'Back to login',
-                    onPressed: _busy
-                        ? null
-                        : () => Navigator.of(context).pop(),
+                    onPressed: _busy ? null : () => Navigator.of(context).pop(),
                     icon: const Icon(
                       Icons.arrow_back_rounded,
                       color: CustomColors.primary,
@@ -68,11 +66,11 @@ class _HotelAuthFormState extends State<HotelAuthForm> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     AppIcon(
-                      size: ui.isShort ? 64.0 : 88.0,
+                      size: ui.isShort ? 88.0 : 108.0,
                       radius: 22,
                       color: CustomColors.primary,
                     ),
-                    SizedBox(height: ui.isShort ? 10.0 : 14.0),
+                    SizedBox(height: ui.isShort ? 1.0 : 1.0),
                     const Text(
                       'Hotel Pro',
                       textAlign: TextAlign.center,

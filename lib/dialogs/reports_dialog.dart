@@ -97,9 +97,26 @@ List<BillRecord> _billsForRange(DateTime startDate, DateTime endDate) {
   return bills;
 }
 
+/// Taxable amount of a bill, matching what the bill preview prints.
+int _billTaxableAmount(BillRecord bill) {
+  final int taxable = bill.totalBill - bill.discount;
+  return taxable > 0 ? taxable : 0;
+}
+
+/// GST charged on a bill, matching what the bill preview prints.
+int _billGstAmount(BillRecord bill) {
+  return bill.applyGst ? HotelSettingsStore.taxOn(_billTaxableAmount(bill)) : 0;
+}
+
+/// Final amount the guest pays: taxable amount plus GST.
+int _billGrandTotal(BillRecord bill) {
+  return _billTaxableAmount(bill) + _billGstAmount(bill);
+}
+
 Map<String, int> _calculateTotals(List<BillRecord> bills) {
   int roomRevenue = 0;
   int extraCharges = 0;
+  int gstCollected = 0;
   int totalCollection = 0;
   int cash = 0;
   int upi = 0;
@@ -107,9 +124,13 @@ Map<String, int> _calculateTotals(List<BillRecord> bills) {
   int bankTransfer = 0;
 
   for (final BillRecord bill in bills) {
+    final int gst = _billGstAmount(bill);
+    final int grandTotal = _billGrandTotal(bill);
+
     roomRevenue += bill.roomBill;
     extraCharges += bill.extraCharges;
-    totalCollection += bill.totalBill;
+    gstCollected += gst;
+    totalCollection += grandTotal;
 
     void addPayment(String paymentMode, int amount) {
       final String mode = paymentMode.trim().toLowerCase();
@@ -144,8 +165,7 @@ Map<String, int> _calculateTotals(List<BillRecord> bills) {
       addPayment(paymentMode, amount);
     }
 
-    final int checkoutPayment =
-        bill.totalBill - bill.advance - totalPartPayments;
+    final int checkoutPayment = grandTotal - bill.advance - totalPartPayments;
 
     if (checkoutPayment > 0) {
       addPayment(bill.paymentMode, checkoutPayment);
@@ -155,6 +175,7 @@ Map<String, int> _calculateTotals(List<BillRecord> bills) {
   return {
     "roomRevenue": roomRevenue,
     "extraCharges": extraCharges,
+    "gst": gstCollected,
     "totalCollection": totalCollection,
     "cash": cash,
     "upi": upi,
@@ -173,6 +194,7 @@ Map<int, Map<String, int>> _calculateRoomWiseTotals(List<BillRecord> bills) {
         "bills": 0,
         "roomRevenue": 0,
         "extraCharges": 0,
+        "gst": 0,
         "totalCollection": 0,
       },
     );
@@ -182,7 +204,9 @@ Map<int, Map<String, int>> _calculateRoomWiseTotals(List<BillRecord> bills) {
     totals["bills"] = totals["bills"]! + 1;
     totals["roomRevenue"] = totals["roomRevenue"]! + bill.roomBill;
     totals["extraCharges"] = totals["extraCharges"]! + bill.extraCharges;
-    totals["totalCollection"] = totals["totalCollection"]! + bill.totalBill;
+    totals["gst"] = totals["gst"]! + _billGstAmount(bill);
+    totals["totalCollection"] =
+        totals["totalCollection"]! + _billGrandTotal(bill);
   }
 
   return roomTotals;
@@ -252,6 +276,10 @@ Future<void> _showRoomWiseReport(
                             CustomDetailRow(
                               "Extra charges",
                               "₹${roomTotals[roomNumber]!["extraCharges"]}",
+                            ),
+                            CustomDetailRow(
+                              "GST",
+                              "₹${roomTotals[roomNumber]!["gst"]}",
                             ),
                             const CustomDetailDivider(),
                             CustomDetailRow(
@@ -382,6 +410,7 @@ Future<void> _printReport(
             summaryLine("TOTAL BILLS", bills.length.toString(), bold: true),
             summaryLine("ROOM REVENUE", "Rs. ${totals["roomRevenue"]}"),
             summaryLine("EXTRA CHARGES", "Rs. ${totals["extraCharges"]}"),
+            summaryLine("GST COLLECTED", "Rs. ${totals["gst"]}"),
             summaryLine(
               "TOTAL COLLECTION",
               "Rs. ${totals["totalCollection"]}",
@@ -446,7 +475,7 @@ Future<void> _printReport(
                             _formatDateTime(bill.checkoutTime),
                             bill.stayDurationLabel(),
                             bill.paymentMode,
-                            "Rs. ${bill.totalBill}",
+                            "Rs. ${_billGrandTotal(bill)}",
                           ].map((value) {
                             return pw.Padding(
                               padding: const pw.EdgeInsets.all(5),
@@ -603,9 +632,26 @@ Widget _billTile(BuildContext dialogContext, BillRecord bill) {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              "₹${bill.totalBill}",
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  "₹${_billGrandTotal(bill)}",
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (_billGstAmount(bill) > 0)
+                  Text(
+                    "incl. GST ₹${_billGstAmount(bill)}",
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: CustomColors.muted,
+                    ),
+                  ),
+              ],
             ),
             const Icon(
               Icons.chevron_right_rounded,
@@ -828,6 +874,12 @@ class _ReportsPanelState extends State<ReportsPanel> {
               value: "₹${totals["extraCharges"]}",
               color: CustomColors.cleaning,
               icon: Icons.add_card_rounded,
+            ),
+            CustomStatCard(
+              label: "GST",
+              value: "₹${totals["gst"]}",
+              color: CustomColors.closed,
+              icon: Icons.percent_rounded,
             ),
           ],
         ),

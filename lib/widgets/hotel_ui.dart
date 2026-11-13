@@ -375,7 +375,9 @@ class CustomStatGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final columns = constraints.maxWidth >= 640 ? 4 : 2;
+      final columns = constraints.maxWidth >= 640
+          ? (children.length == 5 ? 3 : 4)
+          : 2;
       const gap = 10.0;
       final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
       return Wrap(
