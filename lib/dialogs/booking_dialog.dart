@@ -3,6 +3,7 @@ import '../widgets/app_toast.dart';
 import '../widgets/custom_bottom_sheet.dart';
 import '../theme/custom_colors.dart';
 import '../widgets/hotel_ui.dart';
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/customer.dart';
 import '../models/room.dart';
 import '../services/hotel_photo_bytes.dart';
+import '../services/hotel_photo_storage_service.dart';
 import '../services/hotel_photo_upload_debug.dart';
 import '../services/id_card_ocr.dart';
 import '../stores/customer_store.dart';
@@ -329,6 +331,22 @@ Future<bool?> showBookingDialog(
                   idBackPhoto = oldCustomer.idBackPhotoPath;
                 }
               });
+
+              // Saved photos stay in Storage until this booking needs them.
+              unawaited(() async {
+                await HotelPhotoStorageService.instance.hydrateGuestPhotos(
+                  oldCustomer,
+                );
+                if (!dialogContext.mounted) return;
+                updateBookingForm(() {
+                  if (idFrontPhoto.isEmpty) {
+                    idFrontPhoto = oldCustomer.idFrontPhotoPath;
+                  }
+                  if (idBackPhoto.isEmpty) {
+                    idBackPhoto = oldCustomer.idBackPhotoPath;
+                  }
+                });
+              }());
 
               if (!alreadyLookedUp) {
                 showAppToast(
@@ -867,6 +885,9 @@ Future<bool?> showBookingDialog(
                             );
 
                             if (oldCustomer != null) {
+                              await HotelPhotoStorageService.instance
+                                  .hydrateGuestPhotos(oldCustomer);
+                              if (!dialogContext.mounted) return;
                               updateBookingForm(() {
                                 (guest["name"] as TextEditingController).text =
                                     oldCustomer.guestName;

@@ -78,6 +78,9 @@ class HotelPhotoStorageService extends ChangeNotifier {
     _retryTimer = null;
     await _syncFuture;
     await _flushFuture;
+    _guestPaths.clear();
+    _guestPhotoFetches.clear();
+    _guestPhotoFailures.clear();
   }
 
   /// The UI archives pending bytes before an explicit cloud-photo resolution.
@@ -114,6 +117,13 @@ class HotelPhotoStorageService extends ChangeNotifier {
   }
 
   Map<String, String> _pathIndex = <String, String>{};
+  // Storage object paths learned from cloud guest docs. Guest photos download
+  // only when a screen opens, so the path index avoids a Firestore round-trip
+  // on that first open. Nothing here is downloaded or persisted up front.
+  final Map<String, String> _guestPaths = <String, String>{};
+  final Map<String, Future<String?>> _guestPhotoFetches =
+      <String, Future<String?>>{};
+  final Map<String, String> _guestPhotoFailures = <String, String>{};
   bool _indexLoaded = false;
 
   bool get isAvailable =>
@@ -141,6 +151,49 @@ class HotelPhotoStorageService extends ChangeNotifier {
     if (path.isEmpty) return false;
     await _loadIndex();
     return _pathIndex[path] == localSha;
+  }
+
+  /// Learns where each guest photo lives from the cloud guest docs, without
+  /// downloading any bytes. Photos are fetched later, only when opened.
+  Future<void> primePhotoIndex({
+    required String businessId,
+    required Map<String, Map<String, dynamic>> guestDocs,
+  }) async {
+    await _loadIndex();
+    guestDocs.forEach((String guestId, Map<String, dynamic> doc) {
+      if (doc['deleted'] == true) return;
+      for (final String side in const <String>['front', 'back']) {
+        final String head =
+            (doc[side == 'front' ? 'idFrontSha256' : 'idBackSha256'] ?? '')
+                .toString();
+        if (head.isNotEmpty) {
+          _photoHeads['$businessId:${HotelPhotoPaths.metaKey(guestId: guestId, side: side)}'] =
+              head;
+        }
+        final String? path = _pathFromDoc(doc, front: side == 'front');
+        if (path != null) {
+          _guestPaths['$businessId:$guestId:$side'] = path;
+        }
+      }
+      final dynamic extras = doc['additionalPhotos'];
+      if (extras is Map) {
+        extras.forEach((dynamic id, dynamic value) {
+          if (value is! Map) return;
+          for (final String side in const <String>['front', 'back']) {
+            final String path =
+                (value[side == 'front'
+                            ? 'idFrontStoragePath'
+                            : 'idBackStoragePath'] ??
+                        '')
+                    .toString()
+                    .trim();
+            if (path.isNotEmpty) {
+              _guestPaths['$businessId:$guestId:additional:$id:$side'] = path;
+            }
+          }
+        });
+      }
+    });
   }
 
   Future<Map<String, String>> photoStoragePaths() async {
@@ -891,30 +944,115 @@ class HotelPhotoStorageService extends ChangeNotifier {
     Customer guest, {
     required bool front,
   }) async {
-    final raw = front ? guest.idFrontPhotoPath : guest.idBackPhotoPath;
-    final local = decodeBase64Photo(raw);
-    if (local != null) return local;
+    final String? raw = await guestPhotoBase64(
+      guest,
+      front: front,
+      throwOnFailure: true,
+    );
+    return decodeBase64Photo(raw ?? '');
+  }
+
+  /// Loads one guest ID photo only when a screen needs it. Cached base64 on the
+  /// guest is reused, and concurrent opens share one download.
+  Future<String?> guestPhotoBase64(
+    Customer guest, {
+    required bool front,
+    bool throwOnFailure = false,
+  }) async {
+    final String current = front
+        ? guest.idFrontPhotoPath
+        : guest.idBackPhotoPath;
+    if (HotelPhotoRef.looksLikePhotoBytes(current)) return current;
     if (!isAvailable || guest.customerId.isEmpty) return null;
-    final businessId = await _businessId();
-    if (businessId == null) return null;
+    final String key = '${guest.customerId}:${front ? 'front' : 'back'}';
+    final Future<String?> future = _guestPhotoFetches[key] ??=
+        _downloadGuestPhoto(
+          guest,
+          front: front,
+        ).whenComplete(() => _guestPhotoFetches.remove(key));
+    final String? value = await future;
+    final String? failure = _guestPhotoFailures[key];
+    if (value == null && failure != null && throwOnFailure) {
+      throw StateError(failure);
+    }
+    return value;
+  }
+
+  /// Warms both sides for actions that need bytes immediately (print/edit).
+  Future<void> hydrateGuestPhotos(Customer guest) async {
+    await Future.wait(<Future<String?>>[
+      guestPhotoBase64(guest, front: true),
+      guestPhotoBase64(guest, front: false),
+    ]);
+  }
+
+  Future<String?> _downloadGuestPhoto(
+    Customer guest, {
+    required bool front,
+  }) async {
+    final String key = '${guest.customerId}:${front ? 'front' : 'back'}';
+    _guestPhotoFailures.remove(key);
+    try {
+      final String? businessId = await _businessId();
+      if (businessId == null) return null;
+      final String? path = await _guestStoragePath(
+        businessId,
+        guest.customerId,
+        front: front,
+      );
+      if (path == null) return null;
+      final String? value = await _downloadBase64(
+        path,
+        markRestoreFailure: false,
+      );
+      if (value == null) {
+        _guestPhotoFailures[key] = 'ID photo could not be downloaded.';
+        return null;
+      }
+      if (front) {
+        guest.idFrontPhotoPath = value;
+      } else {
+        guest.idBackPhotoPath = value;
+      }
+      return value;
+    } catch (error) {
+      final String message = error is StateError
+          ? error.message.toString()
+          : error.toString();
+      _guestPhotoFailures[key] = message;
+      lastPhotoError = message;
+      debugPrint(
+        '[PHOTO_LOAD] guest=${guest.customerId} front=$front reason=$message',
+      );
+      return null;
+    }
+  }
+
+  Future<String?> _guestStoragePath(
+    String businessId,
+    String guestId, {
+    required bool front,
+  }) async {
+    final String side = front ? 'front' : 'back';
+    final String key = '$businessId:$guestId:$side';
+    final String? known = _guestPaths[key];
+    if (known != null) return known;
     final snap = await HotelFirestoreService.instance
         .col(businessId, 'guests')
-        .doc(guest.customerId)
+        .doc(guestId)
         .get(const GetOptions(source: Source.server));
-    final data = snap.data();
-    if (data == null || data['deleted'] == true) return null;
-    final path = _pathFromDoc(data, front: front);
-    if (path == null) return null;
-    final value = await _downloadBase64(path);
-    if (value == null) {
-      throw StateError(lastPhotoError ?? 'ID photo could not be downloaded.');
+    final Map<String, dynamic>? doc = snap.data();
+    if (doc == null || doc['deleted'] == true) return null;
+    final String? path = _pathFromDoc(doc, front: front);
+    if (path != null) {
+      _guestPaths[key] = path;
+      return path;
     }
-    if (front) {
-      guest.idFrontPhotoPath = value;
-    } else {
-      guest.idBackPhotoPath = value;
-    }
-    return decodeBase64Photo(value);
+    final bool flagged = doc[front ? 'hasFrontPhoto' : 'hasBackPhoto'] == true;
+    if (!flagged) return null;
+    return front
+        ? HotelPhotoPaths.front(businessId, guestId)
+        : HotelPhotoPaths.back(businessId, guestId);
   }
 
   /// Download photos after Firestore guest restore. Never throws to caller.
@@ -922,6 +1060,8 @@ class HotelPhotoStorageService extends ChangeNotifier {
     required String businessId,
     required Map<String, Map<String, dynamic>> guestDocs,
   }) async {
+    // Never run two download loops (bootstrap + a pull) over the same records.
+    if (restoring) return;
     restoring = true;
     hasRestoreFailures = false;
     try {
@@ -1268,6 +1408,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
   Future<String?> _downloadBase64(
     String? path, {
     bool missingIsFailure = true,
+    bool markRestoreFailure = true,
   }) async {
     if (path == null || path.isEmpty || !isAvailable) {
       if ((path ?? '').isNotEmpty && !isAvailable) {
@@ -1297,7 +1438,7 @@ class HotelPhotoStorageService extends ChangeNotifier {
       );
       return base64Encode(bytes);
     } catch (error) {
-      if (missingIsFailure) {
+      if (missingIsFailure && markRestoreFailure) {
         hasRestoreFailures = true;
         lastPhotoError = error.toString();
       }

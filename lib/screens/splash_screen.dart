@@ -4,6 +4,9 @@ import '../widgets/app_icon.dart';
 import 'package:flutter/material.dart';
 
 /// Branded launch transition; the destination starts its normal session checks.
+///
+/// The destination is mounted underneath immediately so the login/cloud read
+/// runs while the splash animation plays instead of after it.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key, required this.destination});
   final Widget destination;
@@ -16,9 +19,10 @@ class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _animation = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1100),
+    duration: const Duration(milliseconds: 900),
   )..forward();
   bool _finished = false;
+  bool _hidden = false;
 
   @override
   void initState() {
@@ -27,7 +31,7 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _open() async {
-    await Future<void>.delayed(const Duration(milliseconds: 1700));
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
     if (mounted) setState(() => _finished = true);
   }
 
@@ -39,7 +43,36 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (_finished) return widget.destination;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        widget.destination,
+        if (!_hidden)
+          Positioned.fill(
+            child: AbsorbPointer(
+              child: AnimatedOpacity(
+                opacity: _finished ? 0 : 1,
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOut,
+                onEnd: () {
+                  if (_finished && mounted) setState(() => _hidden = true);
+                },
+                child: _SplashBody(animation: _animation),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _SplashBody extends StatelessWidget {
+  const _SplashBody({required this.animation});
+
+  final Animation<double> animation;
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -60,13 +93,13 @@ class _SplashScreenState extends State<SplashScreen>
               const Spacer(),
               FadeTransition(
                 opacity: CurvedAnimation(
-                  parent: _animation,
+                  parent: animation,
                   curve: Curves.easeIn,
                 ),
                 child: ScaleTransition(
                   scale: Tween<double>(begin: .85, end: 1).animate(
                     CurvedAnimation(
-                      parent: _animation,
+                      parent: animation,
                       curve: Curves.easeOutCubic,
                     ),
                   ),

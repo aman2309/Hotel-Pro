@@ -38,6 +38,7 @@ class HotelCloudSyncService extends ChangeNotifier {
   bool _pullAgain = false;
   bool restoredThisSession = false;
   bool _bootstrapped = false;
+  DateTime? _bootstrappedAt;
   final _bootstrapTask = RetryableTask<void>();
   Future<void>? _flushFuture;
   Future<void>? _captureFuture;
@@ -161,17 +162,23 @@ class HotelCloudSyncService extends ChangeNotifier {
     _bootstrapTask.reset();
     if (!_bootstrapped) {
       await bootstrap();
-    } else {
-      await flushOutbox();
-      await pullFromCloud();
-      final photos = HotelPhotoStorageService.instance;
-      await photos.syncPending(reason: 'refresh');
-      if (photos.hasPendingUploadFailure) {
-        lastError =
-            'Photo upload is pending. Check internet and refresh again.';
-        status = HotelCloudStatus.error;
-        notifyListeners();
-      }
+      return;
+    }
+    // RoomDashboard refreshes as soon as it mounts, right after bootstrap has
+    // already read this exact state. Skip only that duplicate burst.
+    final DateTime? justRestored = _bootstrappedAt;
+    if (justRestored != null &&
+        DateTime.now().difference(justRestored) < const Duration(seconds: 2)) {
+      return;
+    }
+    await flushOutbox();
+    await pullFromCloud();
+    final photos = HotelPhotoStorageService.instance;
+    await photos.syncPending(reason: 'refresh');
+    if (photos.hasPendingUploadFailure) {
+      lastError = 'Photo upload is pending. Check internet and refresh again.';
+      status = HotelCloudStatus.error;
+      notifyListeners();
     }
   }
 
@@ -186,6 +193,7 @@ class HotelCloudSyncService extends ChangeNotifier {
     await _flushFuture;
     await _pullFuture;
     _bootstrapped = false;
+    _bootstrappedAt = null;
     _bootstrapTask.reset();
     _confirmedBuffer = null;
     _actionCheckpoint = null;
@@ -206,6 +214,7 @@ class HotelCloudSyncService extends ChangeNotifier {
       allowPush = true;
       restoredThisSession = true;
       _bootstrapped = true;
+      _bootstrappedAt = DateTime.now();
       status = HotelCloudStatus.synced;
       lastError = null;
       _startListeners(HotelFirestoreService.instance.businessId!);
@@ -788,17 +797,6 @@ class HotelCloudSyncService extends ChangeNotifier {
         'futureBookings=$futureCount',
       );
 
-      try {
-        await HotelPhotoStorageService.instance
-            .restorePhotos(
-              businessId: businessId,
-              guestDocs: cloud['guests'] ?? <String, Map<String, dynamic>>{},
-            )
-            .timeout(const Duration(seconds: 90));
-      } catch (error, stack) {
-        debugPrint('[PHOTO_RESTORE] download failure reason=$error');
-        _logError('Photo restore skipped; hotel data is intact: $error', stack);
-      }
       final localDocs = await _snapshot();
       final remoteDocs = _flatten(cloud);
       final state = await _readState();
@@ -820,6 +818,13 @@ class HotelCloudSyncService extends ChangeNotifier {
       remoteRevision++;
       lastSyncAt = DateTime.now();
       notifyListeners();
+      // ID photos are large and only needed when a guest screen opens. Record
+      // their Storage paths now (no bytes) so the first open goes straight to
+      // Storage instead of downloading every photo at login.
+      await HotelPhotoStorageService.instance.primePhotoIndex(
+        businessId: businessId,
+        guestDocs: cloud['guests'] ?? <String, Map<String, dynamic>>{},
+      );
       return true;
     } catch (error, stack) {
       debugPrint('[CLOUD_RESTORE] failed reason=$error');
