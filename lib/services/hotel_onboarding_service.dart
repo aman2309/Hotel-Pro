@@ -9,6 +9,8 @@ class HotelOnboardingService {
   static final HotelOnboardingService instance = HotelOnboardingService._();
 
   Future<void> provisionAfterLogin(String businessId) async {
+    // The owner document read during login already told us onboarding is done.
+    if (HotelFirestoreService.instance.onboardingCompleted(businessId)) return;
     // Completed owners do not need a callable/network setup step on every restart.
     final marker = await HotelFirestoreService.instance
         .col(businessId, 'settings')

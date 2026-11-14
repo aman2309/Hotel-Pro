@@ -69,6 +69,14 @@ class _CloudGateState extends State<CloudGate> {
       // login (for example: no hotel for this number) shows its message.
       await PhoneAuthService.instance.waitForLoginPreparation();
       if (!mounted || ticket != _ticket) return;
+      // Re-sent auth tokens are not a new login: never hide a loaded dashboard
+      // behind another full cloud read.
+      final User? sessionUser = FirebaseAuth.instance.currentUser;
+      if (_phase == _GatePhase.ready &&
+          sessionUser != null &&
+          HotelFirestoreService.instance.account?.ownerUid == sessionUser.uid) {
+        return;
+      }
       if (FirebaseAuth.instance.currentUser == null &&
           _phase == _GatePhase.login) {
         return;
@@ -121,6 +129,10 @@ class _CloudGateState extends State<CloudGate> {
         });
         return;
       }
+      // The license is independent of the hotel data read; fetch both at once.
+      final Future<void> licenseRead = LicenseService.instance.readCloudLicense(
+        account.businessId,
+      );
       try {
         await HotelCloudSyncService.instance.bootstrap();
       } catch (error) {
@@ -133,7 +145,7 @@ class _CloudGateState extends State<CloudGate> {
         });
         return;
       }
-      await LicenseService.instance.readCloudLicense(account.businessId);
+      await licenseRead;
       if (!mounted || ticket != _ticket) return;
       final LicenseService license = LicenseService.instance;
       if (license.cloudView == HotelLicenseView.unreadable) {

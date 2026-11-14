@@ -323,8 +323,14 @@ Future<Uint8List> buildBookingSlipPdf(
     ]) {
       for (final front in [true, false]) {
         final raw = front ? guest.frontPhoto : guest.backPhoto;
-        photos['${guest.mobile}:$front:${raw.hashCode}'] =
-            await resolveBookingPhoto(raw, guest.mobile, front);
+        Uint8List? bytes;
+        try {
+          bytes = await resolveBookingPhoto(raw, guest.mobile, front);
+        } catch (_) {
+          // A missing upload should never block the rest of the slip.
+          bytes = null;
+        }
+        photos['${guest.mobile}:$front:${raw.hashCode}'] = bytes;
       }
     }
   }

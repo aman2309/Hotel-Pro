@@ -73,12 +73,18 @@ class HotelFirestoreService {
 
   HotelCloudAccount? _account;
   String? _createdBusinessThisSession;
+  String? _onboardingCompleteBusinessId;
   String? lastError;
 
   HotelCloudAccount? get account => _account;
   String? get businessId => _account?.businessId;
   bool wasBusinessCreatedThisSession(String businessId) =>
       _createdBusinessThisSession == businessId;
+
+  /// True when the owner document already said onboarding is complete, so the
+  /// login does not need a second read of `settings/onboarding`.
+  bool onboardingCompleted(String businessId) =>
+      _onboardingCompleteBusinessId == businessId;
 
   bool get isAvailable => Firebase.apps.isNotEmpty;
 
@@ -151,25 +157,30 @@ class HotelFirestoreService {
     // A revision barrier avoids combining pre-checkout rooms with post-checkout
     // bills when another transaction commits between collection reads.
     final sync = col(businessId, 'settings').doc('sync');
+    final List<String> names = HotelFirestorePaths.businessCollections;
     for (var attempt = 0; attempt < 3; attempt++) {
       final before = (await sync.get(
         const GetOptions(source: Source.server),
       )).data()?['lastSyncAt'];
-      final out = <String, Map<String, Map<String, dynamic>>>{};
-      for (final name in HotelFirestorePaths.businessCollections) {
-        final snap = await col(
-          businessId,
-          name,
-        ).get(const GetOptions(source: Source.server));
-        out[name] = {
-          for (final doc in snap.docs)
-            doc.id: _cloudRecord(name, doc.id, doc.data())!,
-        };
-      }
+      // Reads stay between the two sync reads (the consistency barrier), but
+      // they run together: a login must not wait for ten round trips in a row.
+      final snaps = await Future.wait<QuerySnapshot<Map<String, dynamic>>>([
+        for (final name in names)
+          col(businessId, name).get(const GetOptions(source: Source.server)),
+      ]);
       final after = (await sync.get(
         const GetOptions(source: Source.server),
       )).data()?['lastSyncAt'];
-      if (before == after) return out;
+      if (before != after) continue;
+      final out = <String, Map<String, Map<String, dynamic>>>{};
+      for (var i = 0; i < names.length; i++) {
+        final String name = names[i];
+        out[name] = {
+          for (final doc in snaps[i].docs)
+            doc.id: _cloudRecord(name, doc.id, doc.data())!,
+        };
+      }
+      return out;
     }
     throw StateError(
       'Hotel changed during restore. Retry to load a consistent copy.',
@@ -194,6 +205,7 @@ class HotelFirestoreService {
   void clearAccount() {
     _account = null;
     _createdBusinessThisSession = null;
+    _onboardingCompleteBusinessId = null;
   }
 
   /// Atomic compare-and-set: room, booking, bill and payment projections either
@@ -348,6 +360,13 @@ class HotelFirestoreService {
 
     if (_account?.ownerUid != uid) clearAccount();
     lastError = null;
+    // The OTP flow already verified this owner in this session. Repeating the
+    // whole server handshake (and the phone-index write) on every auth event
+    // only adds round trips to the loading screen.
+    final HotelCloudAccount? verified = _account;
+    if (verified != null && verified.ownerUid == uid) {
+      return verified;
+    }
     try {
       if (allowCreate) {
         await (await HotelDataBuffer.getInstance()).setBool(
@@ -403,6 +422,7 @@ class HotelFirestoreService {
         (await HotelDataBuffer.getInstance()).getBool('hotel_new_owner_$uid') ==
         true;
     final DocumentReference<Map<String, dynamic>> userRef = userDoc(uid);
+    bool onboardingComplete = false;
 
     final _TransactionResult result = await _db.runTransaction((
       Transaction transaction,
@@ -462,6 +482,7 @@ class HotelFirestoreService {
           'Existing hotel belongs to another owner. Mapping was not changed.',
         );
       }
+      onboardingComplete = bizSnap.data()?['onboardingStatus'] == 'complete';
       final resolvedPhone = phoneNumber.isNotEmpty
           ? phoneNumber
           : (userSnap.data()?['phoneNumber'] ??
@@ -546,10 +567,18 @@ class HotelFirestoreService {
       _log('Created new businessId=${result.account.businessId} for uid=$uid');
     }
 
-    await _writePhoneIndex(
-      phoneNumber: verifiedPhone,
-      businessId: result.account.businessId,
-      ownerUid: uid,
+    _onboardingCompleteBusinessId = onboardingComplete
+        ? result.account.businessId
+        : null;
+
+    // The transaction above already created the phone index when missing; this
+    // only covers older mappings, so it must not delay opening the dashboard.
+    unawaited(
+      _writePhoneIndex(
+        phoneNumber: verifiedPhone,
+        businessId: result.account.businessId,
+        ownerUid: uid,
+      ),
     );
 
     return result.account;
@@ -577,19 +606,17 @@ class HotelFirestoreService {
   }) async {
     // Lookup failures must propagate: permission/network errors are not proof
     // that a returning owner is new. Only confirmed server absence permits create.
-    final user = await userDoc(
-      uid,
-    ).get(const GetOptions(source: Source.server));
-    final digits = phoneNumber.replaceAll(RegExp(r'\D'), '');
-    Map<String, dynamic>? phone;
-    if (digits.isNotEmpty) {
-      phone =
-          (await _db
-                  .collection(HotelFirestorePaths.phoneIndex)
-                  .doc(digits)
-                  .get(const GetOptions(source: Source.server)))
-              .data();
-    }
+    final String digits = phoneNumber.replaceAll(RegExp(r'\D'), '');
+    final reads = await Future.wait<DocumentSnapshot<Map<String, dynamic>>>([
+      userDoc(uid).get(const GetOptions(source: Source.server)),
+      if (digits.isNotEmpty)
+        _db
+            .collection(HotelFirestorePaths.phoneIndex)
+            .doc(digits)
+            .get(const GetOptions(source: Source.server)),
+    ]);
+    final user = reads.first;
+    final Map<String, dynamic>? phone = digits.isEmpty ? null : reads[1].data();
     final userId = _readBusinessId(user.data());
     final phoneId = _readBusinessId(phone);
     if (userId != null || phoneId != null) {

@@ -12,6 +12,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../models/customer.dart';
 import '../services/hotel_photo_bytes.dart';
+import '../services/hotel_photo_storage_service.dart';
 import '../services/id_card_ocr.dart';
 import '../stores/customer_store.dart';
 import '../stores/hotel_settings_store.dart';
@@ -19,6 +20,9 @@ import '../services/document_output.dart';
 
 Future<void> printCustomerId(Customer customer) async {
   final pw.Document pdf = pw.Document();
+
+  // Photos are not kept in memory after login; fetch them only for this print.
+  await HotelPhotoStorageService.instance.hydrateGuestPhotos(customer);
 
   pw.MemoryImage? frontImage;
   pw.MemoryImage? backImage;
@@ -348,6 +352,10 @@ Future<bool?> showEditCustomerDialog(
   final saveFocus = FocusNode();
 
   final ImagePicker imagePicker = ImagePicker();
+
+  // Editing works on the photo bytes, so fetch them only when this opens.
+  await HotelPhotoStorageService.instance.hydrateGuestPhotos(customer);
+  if (!context.mounted) return null;
 
   String idFrontPhoto = customer.idFrontPhotoPath;
   String idBackPhoto = customer.idBackPhotoPath;
@@ -708,37 +716,62 @@ Future<bool> showGuestDetailsSheet(
 ) async {
   bool edited = false;
 
-  Widget photoBox(String title, String photoData) {
-    final bytes = hotelPhotoBytes(photoData);
+  // ID photos live in Storage, not in the in-memory guest list. Download them
+  // when this sheet opens instead of on every login.
+  final Future<void> photosReady = HotelPhotoStorageService.instance
+      .hydrateGuestPhotos(customer);
 
+  Widget photoBox(String title, bool front) {
     return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            height: 110,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: CustomColors.background,
-              border: Border.all(color: CustomColors.border),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: bytes == null
-                ? const Center(
-                    child: Icon(
-                      Icons.image_not_supported_outlined,
-                      color: CustomColors.muted,
-                    ),
-                  )
-                : Image.memory(bytes, fit: BoxFit.cover),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            bytes == null ? "$title · not added" : title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 10, color: CustomColors.muted),
-          ),
-        ],
+      child: FutureBuilder<void>(
+        future: photosReady,
+        builder: (BuildContext context, AsyncSnapshot<void> snapshot) {
+          final bool loading = snapshot.connectionState != ConnectionState.done;
+          final bytes = hotelPhotoBytes(
+            front ? customer.idFrontPhotoPath : customer.idBackPhotoPath,
+          );
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                height: 110,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: CustomColors.background,
+                  border: Border.all(color: CustomColors.border),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: loading
+                    ? const Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : bytes == null
+                    ? const Center(
+                        child: Icon(
+                          Icons.image_not_supported_outlined,
+                          color: CustomColors.muted,
+                        ),
+                      )
+                    : Image.memory(bytes, fit: BoxFit.cover),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                loading
+                    ? "$title · loading"
+                    : bytes == null
+                    ? "$title · not added"
+                    : title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 10, color: CustomColors.muted),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -786,9 +819,9 @@ Future<bool> showGuestDetailsSheet(
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      photoBox("ID front", customer.idFrontPhotoPath),
+                      photoBox("ID front", true),
                       const SizedBox(width: 10),
-                      photoBox("ID back", customer.idBackPhotoPath),
+                      photoBox("ID back", false),
                     ],
                   ),
                   const SizedBox(height: 4),
