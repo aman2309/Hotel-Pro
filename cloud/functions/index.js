@@ -71,12 +71,16 @@ const OTP_ERRORS = {
 };
 function otpError(result) {
   const [code, message] = OTP_ERRORS[result.error] || ['internal', 'Could not complete OTP login.'];
-  return new HttpsError(code, message, {reason: result.error, retryAfter: result.retryAfter ?? null, remaining: result.remaining ?? null});
+  return new HttpsError(code, message, {reason: result.error, retryAfter: result.retryAfter ?? null,
+    remaining: result.remaining ?? null, gateway: result.gateway ?? null});
 }
-exports.sendLoginOtp = onCall({region: 'asia-south1', maxInstances: 10}, async (request) => {
+// Full Authorization header value for the SMS gateway, e.g. "Bearer <key>".
+// Set with: firebase functions:secrets:set SMS_GATEWAY_AUTH
+const smsGatewayAuth = defineSecret('SMS_GATEWAY_AUTH');
+exports.sendLoginOtp = onCall({region: 'asia-south1', maxInstances: 10, secrets: [smsGatewayAuth]}, async (request) => {
   const result = await smsOtp.sendLoginOtp({
     db: getFirestore(), mobile: request.data?.mobile, ip: request.rawRequest?.ip,
-    sendSms: (message) => smsOtp.sendSmsViaGateway(message),
+    sendSms: (message) => smsOtp.sendSmsViaGateway(message, fetch, smsGatewayAuth.value()),
   });
   if (result.error) throw otpError(result);
   return result;

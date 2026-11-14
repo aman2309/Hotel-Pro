@@ -141,6 +141,7 @@ class PhoneAuthService {
       final result = await _callable(
         'sendLoginOtp',
       ).call(<String, dynamic>{'mobile': mobile.trim()});
+      debugPrint('[OTP_SEND] success data=${result.data}');
       final data = result.data;
       final seconds = data is Map ? data['resendAfter'] : null;
       debugPrint('[PHONE_AUTH] OTP SMS requested');
@@ -148,7 +149,20 @@ class PhoneAuthService {
         resendAfter: Duration(seconds: seconds is num ? seconds.toInt() : 30),
       );
     } catch (error) {
+      _debugOtpError('OTP_SEND', error);
       throw _otpException(error);
+    }
+  }
+
+  /// Prints the full server error (code, message, details) to the console.
+  static void _debugOtpError(String tag, Object error) {
+    if (error is FirebaseFunctionsException) {
+      debugPrint(
+        '[$tag] FAILED code=${error.code} message=${error.message} '
+        'details=${error.details}',
+      );
+    } else {
+      debugPrint('[$tag] FAILED ${error.runtimeType}: $error');
     }
   }
 
@@ -181,6 +195,7 @@ class PhoneAuthService {
       ).call(<String, dynamic>{'mobile': mobile, 'code': code});
       data = result.data as Map;
     } catch (error) {
+      _debugOtpError('OTP_VERIFY', error);
       throw _otpException(error);
     }
     final token = data['token'];

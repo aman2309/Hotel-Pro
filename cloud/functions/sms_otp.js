@@ -43,10 +43,13 @@ function smsText(code) {
 }
 
 /// Real gateway call. Anything but {"code":"200"} is a failed send.
-async function sendSmsViaGateway({mobile, text, messageId}, fetchImpl = fetch) {
+async function sendSmsViaGateway({mobile, text, messageId}, fetchImpl = fetch, authorization = '') {
+  const headers = {'Content-Type': 'application/json'};
+  // The gateway requires an Authorization header (value kept in a secret).
+  if (authorization) headers.Authorization = authorization;
   const response = await fetchImpl(SMS_URL, {
     method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    headers,
     body: JSON.stringify({
       senderId: SENDER_ID, dcs: 0, peId: PE_ID, text,
       dltTemplateId: DLT_TEMPLATE_ID, messageId, numbers: [mobile],
@@ -105,7 +108,8 @@ async function sendLoginOtp({db, mobile: rawMobile, ip, now = Date.now(), sendSm
     console.error('Login OTP SMS failed', {mobileEnding: mobile.slice(-4), error: String(error)});
     // The code never reached the owner: invalidate it and allow an immediate retry.
     await ref.set({hash: null, salt: null, lastSentAt: 0}, {merge: true});
-    return {error: 'sms-failed'};
+    // Gateway status and message only (never the code), for debugging.
+    return {error: 'sms-failed', gateway: String(error?.message || error).slice(0, 300)};
   }
   return {sent: true, resendAfter: RESEND_COOLDOWN_MS / 1000, expiresIn: OTP_TTL_MS / 1000};
 }

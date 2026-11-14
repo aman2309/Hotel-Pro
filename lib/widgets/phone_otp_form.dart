@@ -124,8 +124,13 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
         : null;
     setState(() => _error = null);
     _setBusy(true);
+    debugPrint(
+      '[OTP_SEND] button pressed mobile=$mobile resend=$resend '
+      'signup=${widget.isSignup}',
+    );
     try {
       final sent = await _service.sendOtp(mobile: mobile);
+      debugPrint('[OTP_SEND] sent resendAfter=${sent.resendAfter.inSeconds}s');
       if (!mounted) return;
       setState(() {
         _sentMobile = mobile;
@@ -136,6 +141,10 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
       _otpFocus.requestFocus();
       _listenForSms();
     } on OtpException catch (error) {
+      debugPrint(
+        '[OTP_SEND] shown to user: "${error.message}" '
+        'retryAfter=${error.retryAfter}',
+      );
       if (!mounted) return;
       setState(() => _error = error.message);
       final wait = error.retryAfter;

@@ -127,6 +127,7 @@ test('a failed SMS invalidates the code and allows an immediate retry', async ()
   const now = Date.now();
   const failed = await otp.sendLoginOtp({db, mobile: m, now, sendSms: async () => { throw Error('gateway down'); }, makeCode: () => '7777'});
   assert.equal(failed.error, 'sms-failed');
+  assert.equal(failed.gateway, 'gateway down');
   assert.equal((await otp.verifyLoginOtp({db, auth: fakeAuth(), mobile: m, code: '7777', now})).error, 'expired');
   const retry = await otp.sendLoginOtp({db, mobile: m, now: now + 1000, sendSms: smsRecorder().send});
   assert.equal(retry.sent, true);
@@ -147,8 +148,9 @@ test('the gateway call matches the API and treats non-200 as failure', async () 
     return {status: 200, json: async () => body};
   };
   await otp.sendSmsViaGateway({mobile: '9977243008', text: 'x', messageId: 'abc'},
-    fakeFetch({code: '200', message: '[{"number":"9977243008","messageId":"abc"}]'}));
+    fakeFetch({code: '200', message: '[{"number":"9977243008","messageId":"abc"}]'}), 'Bearer test-key');
   assert.equal(calls[0].url, 'http://165.101.248.69/api/v1/sms/mt');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer test-key');
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     senderId: 'NCDMPL', dcs: 0, peId: '1402491070000048262', text: 'x',
     dltTemplateId: '1477179455315438973', messageId: 'abc', numbers: ['9977243008'],
