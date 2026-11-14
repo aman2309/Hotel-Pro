@@ -1,10 +1,11 @@
-import 'custom_button.dart';
-import '../screens/hotel_signup_screen.dart';
 import 'package:flutter/material.dart';
 
+import '../screens/hotel_signup_screen.dart';
 import '../services/phone_auth_service.dart';
 import '../theme/custom_colors.dart';
 import '../utils/responsive_ui.dart';
+import 'app_icon.dart';
+import 'custom_button.dart';
 import 'phone_otp_form.dart';
 
 /// App login and signup: mobile number (+91) and OTP only.
@@ -48,46 +49,40 @@ class _HotelAuthFormState extends State<HotelAuthForm> {
           builder: (context, ui) => Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  if (_register)
-                    IconButton(
-                      tooltip: 'Back to login',
-                      onPressed: _busy
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      icon: const Icon(
-                        Icons.arrow_back_rounded,
-                        color: CustomColors.primary,
-                      ),
-                    ),
-                  const Icon(
-                    Icons.apartment_rounded,
-                    color: CustomColors.primary,
-                    size: 26,
-                  ),
-                  const SizedBox(width: 9),
-                  const Expanded(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Hotel Pro',
-                        style: TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w700,
-                          color: CustomColors.text,
-                        ),
-                      ),
+              if (_register)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: IconButton(
+                    tooltip: 'Back to login',
+                    onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                    icon: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: CustomColors.primary,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  const Icon(
-                    Icons.auto_awesome_rounded,
-                    color: CustomColors.gold,
-                    size: 20,
-                  ),
-                ],
+                ),
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AppIcon(
+                      size: ui.isShort ? 88.0 : 108.0,
+                      radius: 22,
+                      color: CustomColors.primary,
+                    ),
+                    SizedBox(height: ui.isShort ? 1.0 : 1.0),
+                    const Text(
+                      'Hotel Pro',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                        color: CustomColors.text,
+                        letterSpacing: -.5,
+                      ),
+                    ),
+                  ],
+                ),
               ),
               SizedBox(height: ui.isShort ? 16 : 28),
               Container(

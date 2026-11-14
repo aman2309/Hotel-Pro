@@ -1493,10 +1493,10 @@ class _AdminConsoleState extends State<AdminConsole> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.apartment_rounded,
-                    color: CustomColors.onButton,
+                  AppIcon(
                     size: 34,
+                    radius: 9,
+                    color: CustomColors.onButton,
                   ),
                   SizedBox(height: 12),
                   Text(

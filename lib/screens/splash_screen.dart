@@ -1,5 +1,6 @@
 import '../theme/custom_colors.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_icon.dart';
 import 'package:flutter/material.dart';
 
 /// Branded launch transition; the destination starts its normal session checks.
@@ -85,9 +86,9 @@ class _SplashScreenState extends State<SplashScreen>
                             ),
                           ],
                         ),
-                        child: const Icon(
-                          Icons.apartment_rounded,
+                        child: const AppIcon(
                           size: 76,
+                          radius: 20,
                           color: AppColors.gold,
                         ),
                       ),

@@ -555,7 +555,10 @@ class _HotelDashboardViewState extends State<HotelDashboardView> {
     appBar: AppBar(
       backgroundColor: CustomColors.background,
       foregroundColor: CustomColors.text,
-      leading: const Icon(Icons.apartment_rounded, color: CustomColors.button),
+      leading: const Padding(
+        padding: EdgeInsets.all(10),
+        child: AppIcon(size: 36, radius: 8, color: CustomColors.button),
+      ),
       titleSpacing: 0,
       title: Text(
         widget.hotelName,

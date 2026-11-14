@@ -123,6 +123,7 @@ void main() {
       ),
     );
     await tester.enterText(find.byType(TextFormField).first, '9876543210');
+    await tester.ensureVisible(find.text('Send OTP'));
     await tester.tap(find.text('Send OTP'));
     await tester.pump();
     await tester.enterText(find.byKey(OtpCodeBoxes.inputKey), '1111');
