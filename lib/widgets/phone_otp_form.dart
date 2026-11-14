@@ -1,12 +1,15 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:smart_auth/smart_auth.dart';
 
 import '../services/phone_auth_service.dart';
 import '../theme/custom_colors.dart';
 import 'custom_button.dart';
 import 'custom_text_field.dart';
+import 'otp_code_boxes.dart';
 
 /// Mobile number (+91 fixed) then OTP. Used by the app login, the app
 /// signup page and the hotel web login. Signup also asks owner and hotel
@@ -18,6 +21,7 @@ class PhoneOtpForm extends StatefulWidget {
     this.service,
     this.buttonStyle,
     this.onBusyChanged,
+    this.smsCodeListener,
   });
 
   final bool isSignup;
@@ -26,6 +30,10 @@ class PhoneOtpForm extends StatefulWidget {
   final PhoneAuthService? service;
   final ButtonStyle? buttonStyle;
   final ValueChanged<bool>? onBusyChanged;
+
+  /// Waits for the OTP SMS and returns its code. Defaults to the Android
+  /// SMS User Consent API (no app hash needed); tests pass a fake.
+  final Future<String?> Function()? smsCodeListener;
 
   @override
   State<PhoneOtpForm> createState() => PhoneOtpFormState();
@@ -43,14 +51,14 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
 
   bool _busy = false;
   String? _error;
-  String? _verificationId;
-  int? _resendToken;
   String? _sentTo;
+  String? _sentMobile;
   int _resendIn = 0;
   Timer? _resendTimer;
+  int _smsListenGeneration = 0;
 
   PhoneAuthService get _service => widget.service ?? PhoneAuthService.instance;
-  bool get _codeStage => _verificationId != null;
+  bool get _codeStage => _sentMobile != null;
 
   @override
   void initState() {
@@ -67,6 +75,7 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
   void dispose() {
     _service.signingIn.removeListener(_onSigningInChanged);
     _resendTimer?.cancel();
+    _stopSmsListener();
     _owner.dispose();
     _hotel.dispose();
     _mobile.dispose();
@@ -91,9 +100,9 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
     widget.onBusyChanged?.call(value);
   }
 
-  void _startResendCountdown() {
+  void _startResendCountdown([int seconds = resendSeconds]) {
     _resendTimer?.cancel();
-    setState(() => _resendIn = resendSeconds);
+    setState(() => _resendIn = seconds);
     _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return timer.cancel();
       setState(() => _resendIn--);
@@ -105,8 +114,7 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
     if (_busy) return;
     if (!resend && !_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
-    final mobile = _mobile.text.trim();
-    final e164 = PhoneAuthService.indianE164(mobile);
+    final mobile = resend ? _sentMobile! : _mobile.text.trim();
     _service.signupDraft = widget.isSignup
         ? {
             'ownerName': _owner.text.trim(),
@@ -116,57 +124,96 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
         : null;
     setState(() => _error = null);
     _setBusy(true);
-    final completer = Completer<void>();
-    void done() {
-      if (!completer.isCompleted) completer.complete();
+    try {
+      final sent = await _service.sendOtp(mobile: mobile);
+      if (!mounted) return;
+      setState(() {
+        _sentMobile = mobile;
+        _sentTo = PhoneAuthService.indianE164(mobile);
+        _otp.clear();
+      });
+      _startResendCountdown(sent.resendAfter.inSeconds);
+      _otpFocus.requestFocus();
+      _listenForSms();
+    } on OtpException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.message);
+      final wait = error.retryAfter;
+      if (wait != null && _codeStage) _startResendCountdown(wait.inSeconds);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = PhoneAuthService.signInMessage(error));
+      }
+    } finally {
+      if (mounted) _setBusy(false);
     }
+  }
 
-    await _service.sendOtp(
-      e164Phone: e164,
-      forceResendingToken: resend ? _resendToken : null,
-      onCodeSent: (sent) {
-        if (mounted) {
-          setState(() {
-            _verificationId = sent.verificationId;
-            _resendToken = sent.resendToken ?? _resendToken;
-            _sentTo = e164;
-            _otp.clear();
-          });
-          _startResendCountdown();
-          _otpFocus.requestFocus();
-        }
-        done();
-      },
-      onAutoVerified: (_) => done(),
-      onError: (message) {
-        if (mounted) setState(() => _error = message);
-        done();
-      },
+  /// Android: ask once to read the incoming OTP SMS and fill the boxes.
+  Future<void> _listenForSms() async {
+    final generation = ++_smsListenGeneration;
+    final listener =
+        widget.smsCodeListener ??
+        (kIsWeb || defaultTargetPlatform != TargetPlatform.android
+            ? null
+            : _userConsentSms);
+    if (listener == null) return;
+    String? code;
+    try {
+      code = await listener();
+    } catch (_) {
+      return;
+    }
+    if (!mounted || generation != _smsListenGeneration || !_codeStage) return;
+    if (code == null || !RegExp(r'^\d{4}$').hasMatch(code)) return;
+    if (_otp.text == code) return;
+    _otp.text = code;
+    await _verify();
+  }
+
+  static Future<String?> _userConsentSms() async {
+    final result = await SmartAuth.instance.getSmsWithUserConsentApi(
+      matcher: r'\b\d{4}\b',
     );
-    await completer.future;
-    if (mounted) _setBusy(false);
+    return result.hasData ? result.requireData.code : null;
+  }
+
+  void _stopSmsListener() {
+    _smsListenGeneration++;
+    if (widget.smsCodeListener == null &&
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      unawaited(
+        SmartAuth.instance.removeUserConsentApiListener().catchError(
+          (_) => const SmartAuthResult<void>.success(null),
+        ),
+      );
+    }
   }
 
   Future<void> _verify() async {
-    if (_busy || _verificationId == null) return;
+    final mobile = _sentMobile;
+    if (_busy || mobile == null) return;
     final code = _otp.text.trim();
-    if (!RegExp(r'^\d{6}$').hasMatch(code)) {
-      setState(() => _error = 'Please enter the 6-digit OTP.');
+    if (!RegExp(r'^\d{4}$').hasMatch(code)) {
+      setState(() => _error = 'Please enter the 4-digit OTP.');
       return;
     }
     FocusScope.of(context).unfocus();
     setState(() => _error = null);
     _setBusy(true);
     try {
-      await _service.verifyOtp(verificationId: _verificationId!, smsCode: code);
+      await _service.verifyOtp(mobile: mobile, code: code);
       // The gate opens the hotel; signup's route is closed by the service.
     } catch (error) {
       _service.lastSignInError = null;
       if (mounted) {
         setState(() {
           _error = PhoneAuthService.signInMessage(error);
-          if (FirebaseSessionExpired.matches(error)) _verificationId = null;
+          _otp.clear();
+          if (error is OtpException && error.needsNewCode) _resendIn = 0;
         });
+        _otpFocus.requestFocus();
       }
     } finally {
       if (mounted) _setBusy(false);
@@ -175,9 +222,9 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
 
   void _changeNumber() {
     _resendTimer?.cancel();
+    _stopSmsListener();
     setState(() {
-      _verificationId = null;
-      _resendToken = null;
+      _sentMobile = null;
       _sentTo = null;
       _resendIn = 0;
       _error = null;
@@ -266,21 +313,15 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
                   ],
                 ),
               ),
-              CustomTextField(
-                controller: _otp,
-                focusNode: _otpFocus,
-                margin: const EdgeInsets.only(bottom: 16),
-                label: 'Enter OTP',
-                icon: Icons.sms_outlined,
-                enabled: !_busy,
-                keyboardType: TextInputType.number,
-                textInputAction: TextInputAction.done,
-                autofillHints: const [AutofillHints.oneTimeCode],
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(6),
-                ],
-                onSubmitted: (_) => _verify(),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: OtpCodeBoxes(
+                  controller: _otp,
+                  focusNode: _otpFocus,
+                  length: PhoneAuthService.otpLength,
+                  enabled: !_busy,
+                  onCompleted: (_) => _verify(),
+                ),
               ),
             ],
             if (_error != null)
@@ -323,15 +364,5 @@ class PhoneOtpFormState extends State<PhoneOtpForm> {
         ),
       ),
     );
-  }
-}
-
-/// An expired OTP session needs a fresh code, so the form returns to the
-/// mobile step.
-abstract final class FirebaseSessionExpired {
-  static bool matches(Object error) {
-    final text = error.toString();
-    return text.contains('session-expired') ||
-        text.contains('invalid-verification-id');
   }
 }

@@ -1,38 +1,32 @@
 import 'package:my_first_app/services/phone_auth_service.dart';
 
-/// Records OTP requests without Firebase.
+/// Records OTP requests without Firebase or SMS.
 class FakePhoneAuth extends PhoneAuthService {
   FakePhoneAuth() : super(firebaseReady: () => false);
 
   final List<String> sent = [];
-  final List<int?> resendTokens = [];
   final List<Map<String, String>?> draftsAtSend = [];
   String? verifiedCode;
   Object? verifyError;
+  Object? sendError;
 
   @override
-  Future<void> sendOtp({
-    required String e164Phone,
-    int? forceResendingToken,
-    required void Function(PhoneCodeSent sent) onCodeSent,
-    required void Function(PhoneAuthOutcome outcome) onAutoVerified,
-    required void Function(String message) onError,
-    void Function(String verificationId)? onAutoRetrievalTimeout,
-  }) async {
-    sent.add(e164Phone);
-    resendTokens.add(forceResendingToken);
+  Future<OtpSent> sendOtp({required String mobile}) async {
+    final error = sendError;
+    if (error != null) throw error;
+    sent.add(mobile);
     draftsAtSend.add(signupDraft == null ? null : {...signupDraft!});
-    onCodeSent(const PhoneCodeSent(verificationId: 'vid', resendToken: 7));
+    return const OtpSent(resendAfter: Duration(seconds: 30));
   }
 
   @override
   Future<PhoneAuthOutcome> verifyOtp({
-    required String verificationId,
-    required String smsCode,
+    required String mobile,
+    required String code,
   }) async {
-    verifiedCode = smsCode;
+    verifiedCode = code;
     final error = verifyError;
     if (error != null) throw error;
-    return PhoneAuthOutcome(uid: 'owner-uid', phoneNumber: sent.last);
+    return PhoneAuthOutcome(uid: 'owner-uid', phoneNumber: '+91$mobile');
   }
 }

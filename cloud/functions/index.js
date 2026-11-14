@@ -57,6 +57,44 @@ exports.initializeEmptyHotel = onCall({region: 'asia-south1', maxInstances: 5}, 
   }
 });
 
+// Hotel owner login: OTP by SMS through the DLT gateway, then a custom token.
+const smsOtp = require('./sms_otp');
+const OTP_ERRORS = {
+  'invalid-mobile': ['invalid-argument', 'Enter a valid 10-digit mobile number.'],
+  'cooldown': ['resource-exhausted', 'Please wait before requesting another OTP.'],
+  'daily-limit': ['resource-exhausted', 'Too many OTP requests today. Try again tomorrow.'],
+  'sms-failed': ['unavailable', 'Could not send the OTP SMS. Please try again.'],
+  'invalid-code': ['invalid-argument', 'Incorrect OTP. Please try again.'],
+  'expired': ['deadline-exceeded', 'OTP expired. Please resend OTP.'],
+  'too-many-attempts': ['resource-exhausted', 'Too many wrong attempts. Please resend OTP.'],
+  'user-disabled': ['permission-denied', 'This account is disabled. Please contact support.'],
+};
+function otpError(result) {
+  const [code, message] = OTP_ERRORS[result.error] || ['internal', 'Could not complete OTP login.'];
+  return new HttpsError(code, message, {reason: result.error, retryAfter: result.retryAfter ?? null, remaining: result.remaining ?? null});
+}
+exports.sendLoginOtp = onCall({region: 'asia-south1', maxInstances: 10}, async (request) => {
+  const result = await smsOtp.sendLoginOtp({
+    db: getFirestore(), mobile: request.data?.mobile, ip: request.rawRequest?.ip,
+    sendSms: (message) => smsOtp.sendSmsViaGateway(message),
+  });
+  if (result.error) throw otpError(result);
+  return result;
+});
+exports.verifyLoginOtp = onCall({region: 'asia-south1', maxInstances: 10}, async (request) => {
+  let result;
+  try {
+    result = await smsOtp.verifyLoginOtp({db: getFirestore(), auth: getAuth(), mobile: request.data?.mobile, code: request.data?.code});
+  } catch (error) {
+    // Custom tokens need the functions service account to hold
+    // "Service Account Token Creator" (iam.serviceAccounts.signBlob).
+    console.error('verifyLoginOtp failed', {code: error?.code, message: error?.message});
+    throw new HttpsError('failed-precondition', 'Login setup is incomplete on the server. Please contact support.');
+  }
+  if (result.error) throw otpError(result);
+  return {token: result.token, isNewUser: result.isNewUser};
+});
+
 // Email-era hotels move to the owner's OTP login when the saved mobile matches.
 const {claimHotelByPhone} = require('./phone_claim');
 exports.claimHotelByPhone = onCall({region: 'asia-south1', maxInstances: 5}, async (request) => {

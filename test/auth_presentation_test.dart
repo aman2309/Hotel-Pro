@@ -6,6 +6,10 @@ import 'package:my_first_app/screens/hotel_signup_screen.dart';
 import 'package:my_first_app/theme/app_theme.dart';
 import 'package:my_first_app/widgets/hotel_auth_form.dart';
 
+import 'package:my_first_app/widgets/otp_code_boxes.dart';
+import 'package:my_first_app/widgets/phone_otp_form.dart';
+import 'package:my_first_app/services/phone_auth_service.dart';
+
 import 'support/fake_phone_auth.dart';
 
 void main() {
@@ -77,7 +81,7 @@ void main() {
     await tester.ensureVisible(find.text('Send OTP'));
     await tester.tap(find.text('Send OTP'));
     await tester.pump();
-    expect(phone.sent, ['+919876543210']);
+    expect(phone.sent, ['9876543210']);
     expect(phone.draftsAtSend.single, {
       'ownerName': 'Asha Devi',
       'hotelName': 'Lake View',
@@ -85,25 +89,22 @@ void main() {
     });
     expect(find.text('OTP sent to +919876543210'), findsOneWidget);
     expect(find.text('Resend OTP in 30s'), findsOneWidget);
+    expect(find.byType(OtpCodeBoxes), findsOneWidget);
     await tester.ensureVisible(find.text('Verify & create account'));
     await tester.tap(find.text('Verify & create account'));
     await tester.pump();
-    expect(find.text('Please enter the 6-digit OTP.'), findsOneWidget);
+    expect(find.text('Please enter the 4-digit OTP.'), findsOneWidget);
     expect(phone.verifiedCode, isNull);
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'Enter OTP'),
-      '654321',
-    );
-    await tester.tap(find.text('Verify & create account'));
+    // Typing the 4th digit verifies straight away.
+    await tester.enterText(find.byKey(OtpCodeBoxes.inputKey), '6543');
     await tester.pump();
-    expect(phone.verifiedCode, '654321');
+    expect(phone.verifiedCode, '6543');
 
     await tester.pump(const Duration(seconds: 31));
     await tester.ensureVisible(find.text('Resend OTP'));
     await tester.tap(find.text('Resend OTP'));
     await tester.pump();
-    expect(phone.sent.length, 2);
-    expect(phone.resendTokens.last, 7);
+    expect(phone.sent, ['9876543210', '9876543210']);
     await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });
@@ -124,12 +125,7 @@ void main() {
     await tester.enterText(find.byType(TextFormField).first, '9876543210');
     await tester.tap(find.text('Send OTP'));
     await tester.pump();
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'Enter OTP'),
-      '111111',
-    );
-    await tester.ensureVisible(find.text('Verify & log in'));
-    await tester.tap(find.text('Verify & log in'));
+    await tester.enterText(find.byKey(OtpCodeBoxes.inputKey), '1111');
     await tester.pump();
     expect(
       find.text('No hotel account found. Choose Sign up to create your hotel.'),
@@ -140,6 +136,80 @@ void main() {
     await tester.tap(find.text('Change number'));
     await tester.pump();
     expect(find.text('+91'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('OTP boxes take a pasted code, backspace and server limits', (
+    tester,
+  ) async {
+    final phone = FakePhoneAuth()
+      ..verifyError = const OtpException('Incorrect OTP. Please try again.');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: HotelAuthForm(isSignup: false, service: phone, onReady: () {}),
+      ),
+    );
+    await tester.enterText(find.byType(TextFormField).first, '9876543210');
+    await tester.tap(find.text('Send OTP'));
+    await tester.pump();
+    final input = find.byKey(OtpCodeBoxes.inputKey);
+    // A pasted SMS fragment keeps only the 4 digits.
+    await tester.enterText(input, '12');
+    await tester.pump();
+    expect(find.text('1'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(phone.verifiedCode, isNull);
+    await tester.enterText(input, '1');
+    await tester.pump();
+    expect(find.text('2'), findsNothing);
+    await tester.enterText(input, 'OTP 4821 x');
+    await tester.pump();
+    expect(phone.verifiedCode, '4821');
+    expect(find.text('Incorrect OTP. Please try again.'), findsOneWidget);
+    for (final digit in ['4', '8', '2']) {
+      expect(find.text(digit), findsNothing);
+    }
+
+    phone.sendError = const OtpException(
+      'Please wait before requesting another OTP.',
+      retryAfter: Duration(seconds: 12),
+    );
+    await tester.pump(const Duration(seconds: 31));
+    await tester.ensureVisible(find.text('Resend OTP'));
+    await tester.tap(find.text('Resend OTP'));
+    await tester.pump();
+    expect(
+      find.text('Please wait before requesting another OTP.'),
+      findsOneWidget,
+    );
+    expect(find.text('Resend OTP in 12s'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Android SMS consent fills the boxes and verifies', (
+    tester,
+  ) async {
+    final phone = FakePhoneAuth();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
+          body: PhoneOtpForm(
+            isSignup: false,
+            service: phone,
+            smsCodeListener: () async => '7305',
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextFormField).first, '9876543210');
+    await tester.tap(find.text('Send OTP'));
+    await tester.pump();
+    await tester.pump();
+    expect(phone.verifiedCode, '7305');
     await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });

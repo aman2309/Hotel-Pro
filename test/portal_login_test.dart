@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:my_first_app/admin/admin_app.dart';
 import 'package:my_first_app/theme/app_theme.dart';
 
+import 'package:my_first_app/widgets/otp_code_boxes.dart';
+
 import 'support/fake_phone_auth.dart';
 
 void main() {
@@ -32,16 +34,11 @@ void main() {
     await tester.ensureVisible(find.text('Send OTP'));
     await tester.tap(find.text('Send OTP'));
     await tester.pump();
-    expect(phone.sent, ['+919876543210']);
+    expect(phone.sent, ['9876543210']);
     expect(phone.draftsAtSend.single, isNull);
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'Enter OTP'),
-      '123456',
-    );
-    await tester.ensureVisible(find.text('Verify & log in'));
-    await tester.tap(find.text('Verify & log in'));
+    await tester.enterText(find.byKey(OtpCodeBoxes.inputKey), '1234');
     await tester.pump();
-    expect(phone.verifiedCode, '123456');
+    expect(phone.verifiedCode, '1234');
     await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });

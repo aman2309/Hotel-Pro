@@ -662,37 +662,26 @@ void main() {
     expect(PhoneAuthSession.businessId, 'biz_xehC63jAFQWvlgKRwabV');
   });
 
-  test(
-    'missing SHA client identifier is explained without disabling verification',
-    () {
-      expect(
-        PhoneAuthService.humanize(
-          FirebaseAuthException(
-            code: 'missing-client-identifier',
-            message: 'App identifier missing',
-          ),
+  test('SMS OTP login errors are shown in plain words', () {
+    expect(
+      PhoneAuthService.signInMessage(
+        const OtpException('Incorrect OTP. Please try again.'),
+      ),
+      'Incorrect OTP. Please try again.',
+    );
+    expect(
+      PhoneAuthService.signInMessage(
+        StateError(
+          'Bad state: No hotel account found. Choose Sign up to create your hotel.',
         ),
-        contains('setup is incomplete'),
-      );
-      expect(
-        PhoneAuthService.humanize(
-          FirebaseAuthException(
-            code: 'unknown',
-            message:
-                'A play_integrity_token was passed, but no matching SHA-256 was registered',
-          ),
-        ),
-        contains('contact support'),
-      );
-      expect(
-        PhoneAuthService.humanize(
-          FirebaseAuthException(
-            code: 'captcha-check-failed',
-            message: 'captcha',
-          ),
-        ),
-        contains('Phone verification check failed'),
-      );
-    },
-  );
+      ),
+      'No hotel account found. Choose Sign up to create your hotel.',
+    );
+    expect(
+      PhoneAuthService.humanize(
+        FirebaseAuthException(code: 'invalid-custom-token'),
+      ),
+      contains('resend OTP'),
+    );
+  });
 }

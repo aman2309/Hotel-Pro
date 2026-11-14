@@ -7,7 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_first_app/screens/hotel_dashboard_view.dart';
 import 'package:my_first_app/screens/license_screen.dart';
-import 'package:my_first_app/screens/otp_verification_screen.dart';
+import 'package:my_first_app/widgets/hotel_auth_form.dart';
+import 'package:my_first_app/widgets/otp_code_boxes.dart';
 import 'package:my_first_app/dialogs/hotel_settings_dialog.dart';
 import 'package:my_first_app/dialogs/booking_dialog.dart';
 import 'package:my_first_app/dialogs/expenses_dialog.dart';
@@ -21,6 +22,8 @@ import 'package:my_first_app/dialogs/bill_preview_dialog.dart';
 import 'package:my_first_app/dialogs/booking_view_dialog.dart';
 import 'package:my_first_app/dialogs/backup_restore_dialog.dart';
 import 'package:my_first_app/theme/app_theme.dart';
+
+import 'support/fake_phone_auth.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -214,14 +217,20 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: const OtpVerificationScreen(
-          e164Phone: '+919999999999',
-          verificationId: 'preview',
+        home: HotelAuthForm(
+          isSignup: false,
+          service: FakePhoneAuth(),
+          onReady: () {},
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '9999999999');
+    await tester.ensureVisible(find.text('Send OTP'));
+    await tester.tap(find.text('Send OTP'));
+    await tester.pump();
+    expect(find.byType(OtpCodeBoxes), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
