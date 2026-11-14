@@ -153,9 +153,11 @@ void main() {
       ),
     );
     await tester.enterText(find.byType(TextFormField).first, '9876543210');
+    await tester.ensureVisible(find.text('Send OTP'));
     await tester.tap(find.text('Send OTP'));
     await tester.pump();
     final input = find.byKey(OtpCodeBoxes.inputKey);
+    await tester.ensureVisible(input);
     // A pasted SMS fragment keeps only the 4 digits.
     await tester.enterText(input, '12');
     await tester.pump();
